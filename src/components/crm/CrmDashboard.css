@@ -1,0 +1,310 @@
+/**
+ * CrmDashboard.css
+ * Clean, minimal table styling with horizontal row layout
+ */
+
+.crm-dashboard-container {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* ============================================================================
+   TABLE WRAPPER & BASE STYLING
+   ============================================================================ */
+
+.table-wrapper {
+  background: white;
+  border-radius: 4px;
+  border: 1px solid #e0e0e0;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+}
+
+/* ============================================================================
+   TABLE HEADER
+   ============================================================================ */
+
+.data-table thead {
+  background: #f5f5f5;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.data-table th {
+  padding: 12px 14px;
+  font-weight: 600;
+  color: #666;
+  text-align: left;
+  vertical-align: middle;
+  user-select: none;
+  white-space: nowrap;
+}
+
+.data-table th.sortable {
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.data-table th.sortable:hover {
+  background-color: #ececec;
+}
+
+.th-content {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.sort-indicator {
+  font-size: 11px;
+  color: #999;
+  margin-left: 2px;
+}
+
+/* ============================================================================
+   TABLE BODY & ROWS
+   ============================================================================ */
+
+.data-table tbody tr.data-row {
+  border-bottom: 1px solid #f0f0f0;
+  transition: background-color 0.15s ease;
+  height: auto;
+}
+
+.data-table tbody tr.data-row:hover {
+  background-color: #fafafa;
+}
+
+.data-table tbody tr.data-row:last-child {
+  border-bottom: none;
+}
+
+.data-table tbody td {
+  padding: 12px 14px;
+  color: #1a1a1a;
+  text-align: left;
+  vertical-align: middle;
+  height: auto;
+}
+
+/* ============================================================================
+   CELL COLUMN STYLING
+   ============================================================================ */
+
+.cell-name {
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.cell-phone {
+  color: #666;
+  font-size: 11px;
+  font-family: 'Courier New', monospace;
+  white-space: nowrap;
+}
+
+.cell-tier {
+  display: inline-block;
+}
+
+.cell-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.status-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-weight: 500;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.status-icon {
+  font-size: 12px;
+}
+
+.cell-date {
+  color: #999;
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.cell-actions {
+  text-align: center;
+  white-space: nowrap;
+  display: flex;
+  gap: 4px;
+  justify-content: flex-start;
+}
+
+/* ============================================================================
+   ACTION BUTTONS & ICONS
+   ============================================================================ */
+
+.icon-button {
+  padding: 6px 8px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 16px;
+  transition: all 0.15s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  color: #666;
+  min-height: 28px;
+  min-width: 28px;
+}
+
+.icon-button:hover {
+  background: #f0f0f0;
+  border-color: #ddd;
+  color: #333;
+}
+
+.icon-button.edit-btn:hover {
+  background: #e3f2fd;
+  border-color: #0066cc;
+  color: #0066cc;
+}
+
+.icon-button.delete-btn:hover {
+  background: #ffebee;
+  border-color: #d32f2f;
+  color: #d32f2f;
+}
+
+.icon-button:focus {
+  outline: 2px solid #0066cc;
+  outline-offset: -2px;
+}
+
+/* ============================================================================
+   EMPTY STATE
+   ============================================================================ */
+
+.empty-row {
+  background-color: #fafafa !important;
+}
+
+.empty-state {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  padding: 24px 16px !important;
+  font-weight: 500;
+}
+
+/* ============================================================================
+   LOADING & ERROR STATES
+   ============================================================================ */
+
+.loading-skeleton {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.skeleton-row {
+  height: 40px;
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200% 100%;
+  animation: loading 1.5s infinite;
+  border-radius: 2px;
+}
+
+@keyframes loading {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.error-banner {
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 4px;
+  color: #c62828;
+  padding: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+/* ============================================================================
+   RESPONSIVE DESIGN
+   ============================================================================ */
+
+@media (max-width: 768px) {
+  .crm-dashboard-container {
+    padding: 12px;
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 10px 8px;
+    font-size: 11px;
+  }
+
+  .cell-name {
+    max-width: 100px;
+  }
+}
+
+@media (max-width: 480px) {
+  .data-table th,
+  .data-table td {
+    padding: 8px 6px;
+    font-size: 10px;
+  }
+
+  .icon-button {
+    padding: 4px 6px;
+    font-size: 14px;
+  }
+}
+
+/* ============================================================================
+   TOAST & NOTIFICATIONS
+   ============================================================================ */
+
+.toast-notification {
+  position: fixed;
+  bottom: 20px;
+  right: 20px;
+  background: #4caf50;
+  color: white;
+  padding: 12px 16px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  animation: slideInUp 0.3s ease-out;
+  z-index: 100;
+}
+
+@keyframes slideInUp {
+  from {
+    transform: translateY(20px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

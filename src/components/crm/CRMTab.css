@@ -1,0 +1,47 @@
+.crm-tab-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding-bottom: 16px;
+}
+
+.crm-tab-header {
+  padding: 0 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.btn-add-member {
+  padding: 8px 16px;
+  background: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s, box-shadow 0.15s;
+}
+
+.btn-add-member:hover {
+  background: #0052a3;
+  box-shadow: 0 2px 8px rgba(0, 102, 204, 0.3);
+}
+
+.btn-add-member:active {
+  transform: scale(0.98);
+}
+
+@media (max-width: 768px) {
+  .crm-tab-container {
+    padding-bottom: 12px;
+  }
+
+  .crm-tab-header {
+    padding: 0 12px;
+  }
+
+  .btn-add-member {
+    width: 100%;
+  }
+}

@@ -1,0 +1,41 @@
+{
+  "name": "vidabaile",
+  "private": true,
+  "version": "0.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "node scripts/copy-amplify-outputs.js && vite",
+    "build": "node scripts/copy-amplify-outputs.js && tsc -b && vite build",
+    "lint": "oxlint",
+    "preview": "vite preview",
+    "test": "vitest --run",
+    "test:watch": "vitest",
+    "sandbox": "ampx sandbox",
+    "sandbox:delete": "ampx sandbox delete"
+  },
+  "dependencies": {
+    "@aws-amplify/ui-react": "^6.15.6",
+    "aws-amplify": "^6.20.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@aws-amplify/backend": "^1.24.0",
+    "@aws-amplify/backend-cli": "^1.9.0",
+    "@testing-library/jest-dom": "6.6.3",
+    "@testing-library/react": "16.3.0",
+    "@testing-library/user-event": "14.6.1",
+    "@types/jest": "29.5.14",
+    "@types/node": "26.4.1",
+    "@types/react": "18.3.23",
+    "@types/react-dom": "18.3.7",
+    "@vitejs/plugin-react": "4.5.2",
+    "@vitest/coverage-v8": "3.2.3",
+    "fast-check": "3.23.2",
+    "jsdom": "26.1.0",
+    "oxlint": "1.81.0",
+    "typescript": "^5.8.3",
+    "vite": "6.3.5",
+    "vitest": "3.2.3"
+  }
+}

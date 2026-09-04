@@ -1,0 +1,171 @@
+/* FacilitiesTab.css — Facility display grid styling */
+
+.facilities-tab-container {
+  padding: 16px;
+}
+
+.facilities-tab-container h2 {
+  margin: 0 0 16px 0;
+  font-size: 14px;
+  font-weight: 700;
+  color: #2e3b50;
+}
+
+.facilities-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.facility-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 4px;
+  padding: 16px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+  position: relative;
+}
+
+.facility-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.facility-name {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2e3b50;
+}
+
+.availability-badge {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 3px;
+}
+
+.availability-badge.available {
+  color: #27ae60;
+  background: #f0f8f4;
+}
+
+.availability-badge.unavailable {
+  color: #e74c3c;
+  background: #fef5f5;
+}
+
+.facility-icon {
+  font-size: 14px;
+}
+
+.facility-meta {
+  font-size: 12px;
+  color: #2e3b50;
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+
+.facility-meta div {
+  margin-bottom: 4px;
+}
+
+.facility-occupancy {
+  margin-bottom: 12px;
+}
+
+.occupancy-header {
+  display: flex;
+  justify-content: space-between;
+  margin-bottom: 6px;
+  font-size: 12px;
+}
+
+.occupancy-label {
+  color: #666;
+  font-weight: 500;
+}
+
+.occupancy-percent {
+  font-weight: 600;
+}
+
+.occupancy-bar {
+  height: 8px;
+  background: #e0e0e0;
+  border-radius: 4px;
+  overflow: hidden;
+}
+
+.occupancy-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+}
+
+.occupancy-current {
+  font-size: 12px;
+  color: #1a1a1a;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+
+.status-badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 4px 8px;
+  border-radius: 3px;
+  text-transform: uppercase;
+}
+
+.status-badge.active {
+  background: #f0f8f4;
+  color: #27ae60;
+}
+
+.status-badge.inactive {
+  background: #f5f5f5;
+  color: #666;
+}
+
+.status-badge.maintenance {
+  background: #fef5f5;
+  color: #e74c3c;
+}
+
+.facility-info {
+  font-size: 11px;
+  color: #666;
+  margin-bottom: 4px;
+}
+
+.facility-info strong {
+  font-weight: 600;
+  color: #2e3b50;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+  .facilities-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .facility-card {
+    padding: 12px;
+  }
+
+  .facility-name {
+    font-size: 13px;
+  }
+
+  .availability-badge {
+    font-size: 11px;
+    padding: 3px 6px;
+  }
+}

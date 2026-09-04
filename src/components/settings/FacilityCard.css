@@ -1,0 +1,156 @@
+.facility-card {
+  background: white;
+  border: 1px solid #e0e0e0;
+  border-radius: 6px;
+  overflow: hidden;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+  transition: box-shadow 0.15s, transform 0.15s;
+  display: flex;
+  flex-direction: column;
+}
+
+.facility-card:hover {
+  box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+  transform: translateY(-2px);
+}
+
+.card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  background: #fafafa;
+}
+
+.card-header h4 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: #1a1a1a;
+  flex: 1;
+}
+
+.card-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.icon-btn {
+  padding: 4px 6px;
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+  display: inline-flex;
+  align-items: center;
+  color: #666;
+}
+
+.icon-btn:hover:not(:disabled) {
+  background: #f0f0f0;
+  border-color: #ddd;
+}
+
+.icon-btn.edit-btn:hover:not(:disabled) {
+  background: #e3f2fd;
+  border-color: #0066cc;
+  color: #0066cc;
+}
+
+.icon-btn.delete-btn:hover:not(:disabled) {
+  background: #ffebee;
+  border-color: #d32f2f;
+  color: #d32f2f;
+}
+
+.icon-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.card-body {
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  flex: 1;
+}
+
+.facility-info {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.info-row .label {
+  font-size: 10px;
+  font-weight: 600;
+  color: #999;
+  text-transform: uppercase;
+}
+
+.info-row .value {
+  font-size: 12px;
+  color: #1a1a1a;
+  line-height: 1.4;
+}
+
+.occupancy-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.occupancy-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11px;
+}
+
+.occupancy-header .label {
+  font-weight: 600;
+  color: #666;
+}
+
+.percentage {
+  font-weight: 700;
+  font-size: 13px;
+}
+
+.occupancy-bar {
+  height: 6px;
+  background: #f0f0f0;
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.occupancy-fill {
+  height: 100%;
+  transition: width 0.3s ease;
+  border-radius: 3px;
+}
+
+.occupancy-text {
+  font-size: 10px;
+  color: #999;
+  text-align: right;
+}
+
+.status-badge {
+  padding: 4px 8px;
+  border-radius: 3px;
+  font-size: 10px;
+  font-weight: 600;
+  text-align: center;
+  text-transform: uppercase;
+}

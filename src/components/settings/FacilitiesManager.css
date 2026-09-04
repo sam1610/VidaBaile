@@ -1,0 +1,59 @@
+.facilities-container {
+  padding: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.facilities-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+}
+
+.facilities-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.btn-add-facility {
+  padding: 8px 16px;
+  background: #0066cc;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s;
+}
+
+.btn-add-facility:hover:not(:disabled) {
+  background: #0052a3;
+}
+
+.btn-add-facility:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.loading-message,
+.empty-message {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  padding: 32px 16px;
+}
+
+.error-message {
+  background: #ffebee;
+  border: 1px solid #ffcdd2;
+  border-radius: 4px;
+  color: #c62828;
+  padding: 12px;
+  font-size: 12px;
+  font-weight: 500;
+}
