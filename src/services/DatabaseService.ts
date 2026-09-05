@@ -1868,7 +1868,7 @@ export async function queryBookingsByMember(
       scheduleId: item.scheduleId,
       coachPhone: item.coachPhone,
       memberPhone: item.memberPhone,
-      bookedAt: item.createdAt,
+      bookedAt: item.bookedAt || item.createdAt,
       // Include denormalized schedule data stored on booking
       activityType: item.activityType,
       date: item.date,

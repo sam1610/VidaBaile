@@ -210,6 +210,7 @@ const schema = a.schema({
       location: a.string(),           // Address or location descriptor
       description: a.string(),        // Facility details, amenities
       creditsConsumed: a.integer(),   // 1 (per session)
+      themeColor: a.string(),         // Hex color for facility (e.g., "#FF6B6B" for Hall-1)
     })
     .identifier(['pk', 'sk'])
     .secondaryIndexes((index) => [

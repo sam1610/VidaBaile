@@ -294,6 +294,13 @@ const amplifyOutputs: any = {
               "isRequired": false,
               "attributes": []
             },
+            "themeColor": {
+              "name": "themeColor",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
             "createdAt": {
               "name": "createdAt",
               "isArray": false,

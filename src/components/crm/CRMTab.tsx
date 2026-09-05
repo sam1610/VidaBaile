@@ -6,7 +6,7 @@ import { MemberCrudModal } from './MemberCrudModal';
 import { MemberEnrollmentsModal } from './MemberEnrollmentsModal';
 import { useAdminSub } from '../../hooks';
 import { createMember, type Member } from '../../lib/models';
-import { observeSchedulesByDateRange, observeCoaches } from '../../services/DatabaseService';
+import { observeCoaches } from '../../services/DatabaseService';
 import './CRMTab.css';
 
 /**
@@ -26,39 +26,22 @@ export const CRMTab = () => {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [enrollmentsModalOpen, setEnrollmentsModalOpen] = useState(false);
   const [selectedMemberForEnrollments, setSelectedMemberForEnrollments] = useState<Member | null>(null);
-  const [schedules, setSchedules] = useState<any[]>([]);
   const [coaches, setCoaches] = useState<any[]>([]);
 
-
-  // Fetch schedules and coaches for the enrollments modal
+  // Fetch coaches for the enrollments modal
   useEffect(() => {
     if (!adminSub) return;
-
-    // Get date range: 180 days back to 365 days forward
-    const today = new Date();
-    const startDate = new Date(today);
-    startDate.setDate(startDate.getDate() - 180);
-    const endDate = new Date(today);
-    endDate.setDate(endDate.getDate() + 365);
-
-    const startDateStr = startDate.toISOString().split('T')[0];
-    const endDateStr = endDate.toISOString().split('T')[0];
-
-    const unsubscribeSchedules = observeSchedulesByDateRange(adminSub, startDateStr, endDateStr, (data: any[]) => {
-      setSchedules(data.filter((item) => item.entityType === 'SCHEDULE') || []);
-    });
 
     const unsubscribeCoaches = observeCoaches(adminSub, (data: any[]) => {
       setCoaches(data.filter((item) => item.entityType === 'COACH') || []);
     });
 
     return () => {
-      unsubscribeSchedules();
       unsubscribeCoaches();
     };
   }, [adminSub]);
 
-    const handleAddMember = () => {
+  const handleAddMember = () => {
     setSelectedMember(null);
     setSaveError(null);
     setModalOpen(true);
@@ -70,7 +53,6 @@ export const CRMTab = () => {
     setModalOpen(true);
   };
 
-
   const handleViewEnrollments = (member: Member) => {
     setSelectedMemberForEnrollments(member);
     setEnrollmentsModalOpen(true);
@@ -81,7 +63,7 @@ export const CRMTab = () => {
     setSelectedMemberForEnrollments(null);
   };
 
-    const closeModal = () => {
+  const closeModal = () => {
     setModalOpen(false);
     setSelectedMember(null);
     setSaveError(null);
@@ -146,7 +128,6 @@ export const CRMTab = () => {
         isOpen={enrollmentsModalOpen}
         onClose={closeEnrollmentsModal}
         member={selectedMemberForEnrollments}
-        schedules={schedules}
         coaches={coaches}
       />
     </div>

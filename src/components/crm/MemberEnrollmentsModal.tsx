@@ -3,13 +3,6 @@ import { useAdminSub } from '../../hooks';
 import { queryBookingsByMember } from '../../services/DatabaseService';
 import type { Member } from '../../lib/models';
 
-interface Schedule {
-  id: string;
-  activityType: string;
-  date: string;
-  startTime: string;
-  endTime: string;
-}
 
 interface Coach {
   phone: string;
@@ -33,7 +26,7 @@ interface MemberEnrollmentsModalProps {
   isOpen: boolean;
   onClose: () => void;
   member: Member | null;
-  schedules: Schedule[];
+  
   coaches: Coach[];
 }
 
@@ -103,7 +96,7 @@ export function MemberEnrollmentsModal({
   isOpen,
   onClose,
   member,
-  schedules,
+  
   coaches,
 }: MemberEnrollmentsModalProps) {
   const { adminSub } = useAdminSub();

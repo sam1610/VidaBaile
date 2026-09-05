@@ -13,6 +13,7 @@ interface Facility {
   location: string;
   description: string;
   status: 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE';
+  themeColor?: string; // Hex color assigned to this facility
 }
 
 interface Schedule {
@@ -24,14 +25,22 @@ interface Schedule {
   facilityId: string;
   activityType: string;
   capacity: number;
+  currentOccupancy?: number; // Enrollment count for this schedule
   level?: string;
 }
+
+/**
+ * Visual state of a facility card based on selection and date-range utilization
+ */
+type FacilityCardState = 'deselected' | 'selected-empty' | 'selected-utilized';
 
 /**
  * FacilitiesTab: Visual facility scheduling dashboard with timeline grid
  * 
  * Features:
- * - Facility selection cards with occupancy display
+ * - Facility selection cards with three visual states (deselected, selected-empty, selected-utilized)
+ * - Facility-driven color themes (colors stored on Facility, inherited by schedule blocks)
+ * - CURRENT-HOUR occupancy display with live temporal binding
  * - Date range picker
  * - Timeline grid (Hours × Dates) with color-coded schedules
  * - Real-time facility and schedule updates
@@ -76,6 +85,7 @@ export const FacilitiesTab = () => {
               location: f.location || '',
               description: f.description || '',
               status: f.status || 'ACTIVE',
+              themeColor: f.themeColor, // Assigned facility color
             }))
           : [];
         setFacilities(mapped);
@@ -115,6 +125,7 @@ export const FacilitiesTab = () => {
             facilityId: item.facilityId,
             activityType: item.activityType || '',
             capacity: item.capacity || 30,
+            currentOccupancy: item.currentOccupancy || 0, // Enrollment count
             level: item.level || 'Open Level',
           }));
         setSchedules(scheduleList);
@@ -125,15 +136,128 @@ export const FacilitiesTab = () => {
     return () => unsubscribe();
   }, [adminSub, startDate, endDate]);
 
-  // Assign colors to facilities
-  const facilityColorMap = useMemo(() => {
-    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
-    const map: Record<string, string> = {};
-    facilities.forEach((facility, index) => {
-      map[facility.facilityId] = colors[index % colors.length];
+  /**
+   * Helper: Get current time in HH:MM format (24-hour)
+   */
+  const getCurrentTime = (): string => {
+    const now = new Date();
+    return `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`;
+  };
+
+  /**
+   * Helper: Compare times in HH:MM format
+   * Returns: -1 if time1 < time2, 0 if equal, 1 if time1 > time2
+   */
+  const compareTime = (time1: string, time2: string): number => {
+    const [h1, m1] = time1.split(':').map(Number);
+    const [h2, m2] = time2.split(':').map(Number);
+    const mins1 = h1 * 60 + m1;
+    const mins2 = h2 * 60 + m2;
+    return mins1 < mins2 ? -1 : mins1 > mins2 ? 1 : 0;
+  };
+
+  /**
+   * Helper: Check if a schedule is currently ACTIVE
+   * (today's date AND currentTime is within [startTime, endTime])
+   */
+  const isScheduleActive = (schedule: Schedule): boolean => {
+    const today = new Date().toISOString().split('T')[0];
+    if (schedule.date !== today) return false;
+
+    const currentTime = getCurrentTime();
+    return (
+      compareTime(currentTime, schedule.startTime) >= 0 &&
+      compareTime(currentTime, schedule.endTime) <= 0
+    );
+  };
+
+  /**
+   * Determine the visual state of a facility card
+   * - deselected: not selected
+   * - selected-empty: selected but no schedules in date range
+   * - selected-utilized: selected and has schedules in date range
+   */
+  const getFacilityCardState = (facilityId: string): FacilityCardState => {
+    const isSelected = selectedFacilities.includes(facilityId);
+    if (!isSelected) return 'deselected';
+
+    // Check if facility has any schedules in the selected date range
+    const hasSchedules = schedules.some((s) => s.facilityId === facilityId);
+    return hasSchedules ? 'selected-utilized' : 'selected-empty';
+  };
+
+  /**
+   * Calculate current-hour occupancy for each facility
+   * If an active schedule exists NOW, show its occupancy.
+   * Otherwise, show 0.
+   */
+  const currentHourOccupancy = useMemo(() => {
+    const occupancyMap: Record<string, { occupancy: number; capacity: number }> = {};
+
+    facilities.forEach((facility) => {
+      occupancyMap[facility.facilityId] = { occupancy: 0, capacity: facility.capacity };
     });
-    return map;
-  }, [facilities]);
+
+    // Find active schedules and sum their occupancy
+    schedules.forEach((schedule) => {
+      if (isScheduleActive(schedule) && occupancyMap[schedule.facilityId]) {
+        occupancyMap[schedule.facilityId].occupancy += schedule.currentOccupancy || 0;
+      }
+    });
+
+    return occupancyMap;
+  }, [facilities, schedules]);
+
+  /**
+   * Get the display color for a facility based on its theme
+   * Falls back to default palette if themeColor not set
+   */
+  const getFacilityColor = (facility: Facility): string => {
+    if (facility.themeColor) {
+      return facility.themeColor;
+    }
+    // Fallback to default palette
+    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
+    const index = facilities.findIndex((f) => f.facilityId === facility.facilityId);
+    return colors[index % colors.length];
+  };
+
+  /**
+   * Get the CSS opacity and background for a facility card state
+   */
+  const getFacilityCardStyle = (facility: Facility, state: FacilityCardState) => {
+    const color = getFacilityColor(facility);
+
+    if (state === 'deselected') {
+      // Deselected: 50% opacity, original color
+      return {
+        borderColor: color,
+        backgroundColor: `${color}15`, // 15% opacity
+        opacity: 0.5,
+      };
+    } else if (state === 'selected-empty') {
+      // Selected but empty: Gray (neutral)
+      return {
+        borderColor: '#999',
+        backgroundColor: '#f5f5f5',
+      };
+    } else {
+      // Selected and utilized: Full opacity, original color
+      return {
+        borderColor: color,
+        backgroundColor: `${color}10`, // 10% opacity for subtle background
+      };
+    }
+  };
+
+  /**
+   * Get occupancy color based on utilization percentage
+   */
+  const getOccupancyColor = (percent: number): string => {
+    if (percent >= 80) return '#e74c3c';
+    if (percent >= 50) return '#f39c12';
+    return '#27ae60';
+  };
 
   // Filter schedules by selected facilities
   const filteredSchedules = useMemo(() => {
@@ -166,13 +290,6 @@ export const FacilitiesTab = () => {
     setSelectedFacilities((prev) =>
       prev.includes(facilityId) ? prev.filter((id) => id !== facilityId) : [...prev, facilityId]
     );
-  };
-
-  // Get occupancy color
-  const getOccupancyColor = (percent: number) => {
-    if (percent >= 80) return '#e74c3c';
-    if (percent >= 50) return '#f39c12';
-    return '#27ae60';
   };
 
   // Get schedules for a specific time slot and date
@@ -211,33 +328,40 @@ export const FacilitiesTab = () => {
         ) : (
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
             {facilities.map((facility) => {
+              const state = getFacilityCardState(facility.facilityId);
+              const cardStyle = getFacilityCardStyle(facility, state);
               const isSelected = selectedFacilities.includes(facility.facilityId);
-              const occupancyPercent =
-                facility.capacity > 0 ? (facility.currentOccupancy / facility.capacity) * 100 : 0;
+
+              // Use current-hour occupancy if available, otherwise 0
+              const currentHour = currentHourOccupancy[facility.facilityId];
+              const displayOccupancy = currentHour?.occupancy || 0;
+              const displayCapacity = currentHour?.capacity || facility.capacity;
+              const occupancyPercent = displayCapacity > 0 ? (displayOccupancy / displayCapacity) * 100 : 0;
 
               return (
                 <div
                   key={facility.facilityId}
                   onClick={() => toggleFacility(facility.facilityId)}
                   style={{
-                    border: isSelected ? '2px solid #2196F3' : '1px solid #ddd',
+                    border: `2px solid ${cardStyle.borderColor}`,
                     borderRadius: '4px',
                     padding: '12px',
-                    background: 'white',
+                    background: cardStyle.backgroundColor,
                     cursor: 'pointer',
                     transition: 'all 0.2s',
                     position: 'relative',
-                    boxShadow: isSelected ? '0 2px 8px rgba(33, 150, 243, 0.15)' : '0 1px 2px rgba(0,0,0,0.05)',
+                    boxShadow: isSelected ? '0 2px 8px rgba(0,0,0,0.1)' : '0 1px 2px rgba(0,0,0,0.05)',
+                    opacity: cardStyle.opacity !== undefined ? cardStyle.opacity : 1,
                   }}
                 >
                   {/* Selection checkmark */}
-                  {isSelected && (
+                  {isSelected && state !== 'deselected' && (
                     <div
                       style={{
                         position: 'absolute',
                         top: '8px',
                         right: '8px',
-                        background: '#2196F3',
+                        background: state === 'selected-empty' ? '#666' : getFacilityColor(facility),
                         color: 'white',
                         width: '20px',
                         height: '20px',
@@ -266,9 +390,18 @@ export const FacilitiesTab = () => {
                     <strong>Capacity:</strong> {facility.capacity}
                   </div>
 
+                  {/* Status Message for Empty Cards */}
+                  {state === 'selected-empty' && (
+                    <div style={{ fontSize: '10px', color: '#999', fontStyle: 'italic', marginBottom: '8px' }}>
+                      No activities scheduled
+                    </div>
+                  )}
+
                   {/* Occupancy Bar */}
                   <div style={{ marginBottom: '8px' }}>
-                    <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px' }}>Occupancy</div>
+                    <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px' }}>
+                      Occupancy (Now)
+                    </div>
                     <div
                       style={{
                         height: '6px',
@@ -289,8 +422,8 @@ export const FacilitiesTab = () => {
                   </div>
 
                   {/* Occupancy Number */}
-                  <div style={{ fontSize: '10px', color: '#1a1a1a', fontWeight: '500' }}>
-                    {facility.currentOccupancy} / {facility.capacity} people
+                  <div style={{ fontSize: '10px', color: state === 'selected-empty' ? '#999' : '#1a1a1a', fontWeight: '500' }}>
+                    {displayOccupancy} / {displayCapacity} people
                   </div>
                 </div>
               );
@@ -393,30 +526,36 @@ export const FacilitiesTab = () => {
                       }}
                     >
                       <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                        {cellSchedules.map((schedule) => (
-                          <div
-                            key={schedule.scheduleId}
-                            style={{
-                              background: facilityColorMap[schedule.facilityId],
-                              color: 'white',
-                              padding: '6px 8px',
-                              borderRadius: '3px',
-                              fontSize: '11px',
-                              fontWeight: '500',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: '2px',
-                            }}
-                          >
-                            <div style={{ fontWeight: '600' }}>{schedule.activityType}</div>
-                            <div style={{ fontSize: '10px', opacity: 0.9 }}>
-                              {schedule.startTime} - {schedule.endTime}
+                        {cellSchedules.map((schedule) => {
+                          // Get the facility's theme color
+                          const facility = facilities.find((f) => f.facilityId === schedule.facilityId);
+                          const blockColor = facility ? getFacilityColor(facility) : '#999';
+
+                          return (
+                            <div
+                              key={schedule.scheduleId}
+                              style={{
+                                background: blockColor,
+                                color: 'white',
+                                padding: '6px 8px',
+                                borderRadius: '3px',
+                                fontSize: '11px',
+                                fontWeight: '500',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '2px',
+                              }}
+                            >
+                              <div style={{ fontWeight: '600' }}>{schedule.activityType}</div>
+                              <div style={{ fontSize: '10px', opacity: 0.9 }}>
+                                {schedule.startTime} - {schedule.endTime}
+                              </div>
+                              <div style={{ fontSize: '10px', opacity: 0.85 }}>
+                                {schedule.currentOccupancy || 0} / {schedule.capacity}
+                              </div>
                             </div>
-                            <div style={{ fontSize: '10px', opacity: 0.85 }}>
-                              0 / {schedule.capacity}
-                            </div>
-                          </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </td>
                   );
