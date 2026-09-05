@@ -112,6 +112,7 @@ export interface Schedule extends ClubRecord {
   activityType: string; // Salsa Beginner (required)
   coachPhone: string; // Reference to coach (required)
   capacity: number; // 20 (required)
+  currentOccupancy?: number; // Current enrollment count (optional, defaults to 0)
 }
 
 /**
@@ -133,6 +134,11 @@ export interface Booking extends ClubRecord {
   bookedAt: string; // ISO datetime (required)
   status?: 'CONFIRMED' | 'CANCELLED' | 'COMPLETED';
   notes?: string;
+  // Denormalized schedule data for fast lookups (matches schema field names)
+  activityType?: string; // Copied from schedule.activityType
+  date?: string; // Copied from schedule.date (YYYY-MM-DD format)
+  startTime?: string; // Copied from schedule.startTime (HH:MM format)
+  endTime?: string; // Copied from schedule.endTime (HH:MM format)
 }
 
 /**

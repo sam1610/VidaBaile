@@ -11,10 +11,11 @@ interface Coach {
 
 
 interface Facility {
-  facilityId?: string;
+  facilityId: string;
   id?: string;
   sk?: string;
   name: string;
+  capacity?: number;
 }
 
 interface Schedule {
@@ -27,6 +28,7 @@ interface Schedule {
   activityType: string;
   capacity: number;
   level?: string;
+  currentOccupancy?: number;
 }
 
 interface SchedulesByDate {
@@ -114,6 +116,7 @@ export const ActivitiesTab = () => {
                 id: f.id || f.facilityId || f.sk?.replace('FACILITY#', ''),
                 sk: f.sk,
                 name: f.name || f.location || 'Unknown Facility',
+                capacity: f.capacity || 0,
               }))
             : []
         );
@@ -171,6 +174,7 @@ export const ActivitiesTab = () => {
             activityType: item.activityType || '',
             capacity: item.capacity || 30,
             level: item.level || 'Open Level',
+            currentOccupancy: item.currentOccupancy || 0,
           }));
         setSchedules(scheduleList);
         setSchedulesLoading(false);
@@ -255,7 +259,10 @@ export const ActivitiesTab = () => {
         activityType: data.activityType,
         coachPhone: data.coachPhone,
         capacity: data.capacity,
+        currentOccupancy: data.currentOccupancy || 0,
       };
+      
+      console.log('[ActivitiesTab] Received modal data with currentOccupancy:', data.currentOccupancy, 'Payload:', payload);
 
       if (isEdit) {
         // Update existing activity
@@ -293,21 +300,28 @@ export const ActivitiesTab = () => {
   }
 
   return (
-    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-      <h2 style={{ margin: '0', fontSize: '14px', fontWeight: '700', color: '#2e3b50' }}>
-        📅 ACTIVITIES & SCHEDULES
-      </h2>
-
-      {/* Date Range Picker */}
-      <div
-        style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          gap: '12px',
-          flexWrap: 'wrap',
-        }}
-      >
+    <div style={{ 
+      display: 'flex', 
+      flexDirection: 'column', 
+      height: 'calc(100vh - 140px)', 
+      gap: '0',
+      backgroundColor: '#ffffff'
+    }}>
+      {/* Top Controls Section - Fixed Height */}
+      <div style={{ flexShrink: 0, padding: '16px', borderBottom: '1px solid #e5e7eb' }}>
+        <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: '700', color: '#2e3b50' }}>
+          📅 ACTIVITIES & SCHEDULES
+        </h2>
+        {/* Date Range Picker */}
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+          }}
+        >
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
           <label style={{ fontSize: '12px', fontWeight: '600', color: '#2e3b50' }}>
             From:
@@ -358,9 +372,11 @@ export const ActivitiesTab = () => {
         >
           + New Activity
         </button>
+        </div>
       </div>
+      {/* End Top Controls Section */}
 
-      {/* Schedule Table */}
+      {/* Schedule Table - Scrollable Section */}
       {schedulesLoading || coachesLoading || facilitiesLoading ? (
         <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}>
           Loading schedules...
@@ -395,17 +411,22 @@ export const ActivitiesTab = () => {
           </button>
         </div>
       ) : (
-        <div style={{ overflowX: 'auto' }}>
+        <div style={{ flex: 1, overflowY: 'auto', overflowX: 'auto', position: 'relative' }}>
           <table className="activities-table">
-            <thead>
-              <tr>
-                <th>Activity</th>
-                <th>Time</th>
-                <th>Trainer</th>
-                <th>Attendees</th>
-                <th>Location</th>
-                <th>Level</th>
-                <th>Actions</th>
+            <thead style={{ 
+              position: 'sticky',
+              top: 0,
+              backgroundColor: '#f9fafb',
+              zIndex: 10
+            }}>
+              <tr style={{ borderBottom: '2px solid #e5e7eb' }}>
+                <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#2e3b50' }}>Activity</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#2e3b50' }}>Time</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#2e3b50' }}>Trainer</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#2e3b50' }}>Attendees</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#2e3b50' }}>Location</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#2e3b50' }}>Level</th>
+                <th style={{ padding: '12px', textAlign: 'left', fontSize: '12px', fontWeight: '700', color: '#2e3b50' }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -438,7 +459,7 @@ export const ActivitiesTab = () => {
                           {coachMap[schedule.coachPhone] || schedule.coachPhone}
                         </td>
                         <td style={{ fontSize: '12px', color: '#666', textAlign: 'center' }}>
-                          0 / {schedule.capacity}
+                          {schedule.currentOccupancy || 0} / {schedule.capacity}
                         </td>
                         <td style={{ fontSize: '12px', color: '#666' }}>
                           {facilityMap[schedule.facilityId] || schedule.facilityId}
@@ -504,6 +525,7 @@ export const ActivitiesTab = () => {
         adminSub={adminSub!}
         isLoading={isSubmitting}
         activity={editingActivity}
+        facilities={facilities}
       />
     </div>
   );

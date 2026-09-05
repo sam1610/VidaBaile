@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Tabs, View } from '@aws-amplify/ui-react';
+import { Tabs } from '@aws-amplify/ui-react';
 import { TabPanel } from './TabPanel';
 import { HomeTab } from '../home/HomeTab';
 import { ActivitiesTab } from '../activities/ActivitiesTab';
@@ -76,7 +76,13 @@ export function AppTabs(): React.ReactElement {
   }
 
   return (
-    <View>
+    <div style={{
+      display: 'flex',
+      flexDirection: 'column',
+      flex: 1,
+      height: '100%',
+      overflow: 'hidden'
+    }}>
       {/*
         Tabs.Container owns the controlled state via `value`.
         Wrapping Tabs.List in a div with overflowX:'auto' ensures the tab bar
@@ -86,9 +92,22 @@ export function AppTabs(): React.ReactElement {
         value={String(activeIndex)}
         onValueChange={handleValueChange}
         ariaLabel="Admin navigation"
+        style={{
+          display: 'flex',
+          flexDirection: 'column',
+          flex: 1,
+          overflow: 'hidden'
+        }}
       >
-        {/* Tab bar — horizontal scroll wrapper */}
-        <div style={tabBarWrapperStyle}>
+        {/* Tab bar — horizontal scroll wrapper (frozen at top) */}
+        <header style={{
+          ...tabBarWrapperStyle,
+          flexShrink: 0,
+          backgroundColor: '#ffffff',
+          zIndex: 40,
+          borderBottom: '1px solid #e5e7eb',
+          boxShadow: '0 1px 3px rgba(0,0,0,0.1)'
+        }}>
           <Tabs.List>
             {TAB_CONFIG.map((tab) => (
               <Tabs.Item key={tab.value} value={tab.value}>
@@ -96,18 +115,25 @@ export function AppTabs(): React.ReactElement {
               </Tabs.Item>
             ))}
           </Tabs.List>
-        </div>
+        </header>
 
-        {/* Tab panels — Amplify Tabs.Panel wraps our error-boundary TabPanel */}
-        {TAB_CONFIG.map((tab) => (
-          <Tabs.Panel key={tab.value} value={tab.value}>
-            <TabPanel index={tab.index} activeIndex={activeIndex}>
-              {TAB_PANELS[tab.index]}
-            </TabPanel>
-          </Tabs.Panel>
-        ))}
+        {/* Tab panels container — scrollable content */}
+        <main style={{
+          flex: 1,
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          position: 'relative'
+        }}>
+          {TAB_CONFIG.map((tab) => (
+            <Tabs.Panel key={tab.value} value={tab.value}>
+              <TabPanel index={tab.index} activeIndex={activeIndex}>
+                {TAB_PANELS[tab.index]}
+              </TabPanel>
+            </Tabs.Panel>
+          ))}
+        </main>
       </Tabs.Container>
-    </View>
+    </div>
   );
 }
 

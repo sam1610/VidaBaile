@@ -303,6 +303,7 @@ export async function createScheduleRecord(
     activityType: string;
     coachPhone: string;
     capacity: number;
+    currentOccupancy?: number; // Current enrollment count
   }
 ): Promise<Schedule> {
   try {
@@ -316,8 +317,10 @@ export async function createScheduleRecord(
       activityType: data.activityType,
       coachPhone: data.coachPhone,
       capacity: data.capacity,
+      currentOccupancy: data.currentOccupancy || 0,
     });
 
+    console.log('[DB Service] Creating schedule with payload:', schedule);
     const { data: createdRecord, errors } = await (client.models as any).ClubRecord.create(schedule);
 
     if (errors) {
@@ -365,6 +368,7 @@ export async function updateScheduleRecord(
     activityType: string;
     coachPhone: string;
     capacity: number;
+    currentOccupancy?: number; // Current enrollment count
   }
 ): Promise<Schedule> {
   try {
@@ -384,6 +388,7 @@ export async function updateScheduleRecord(
       activityType: updates.activityType,
       coachPhone: updates.coachPhone,
       capacity: updates.capacity,
+      currentOccupancy: updates.currentOccupancy || 0,
       // GSI keys for querying and filtering
       gsi1pk: `${adminSub}#SCHEDULES`,
       gsi1sk: `COACH#${updates.coachPhone}#TIME#${updates.startTime}`,
@@ -485,7 +490,15 @@ export async function createBookingRecord(
   adminSub: string,
   bookingId: string,
   memberPhone: string,
-  data: { scheduleId: string; coachPhone: string; bookedAt: string }
+  data: { 
+    scheduleId: string; 
+    coachPhone: string; 
+    bookedAt: string;
+    activityType?: string;
+    date?: string;
+    startTime?: string;
+    endTime?: string;
+  }
 ): Promise<Booking> {
   try {
     const client = generateClient<Schema>();
@@ -494,6 +507,10 @@ export async function createBookingRecord(
       scheduleId: data.scheduleId,
       coachPhone: data.coachPhone,
       bookedAt: data.bookedAt,
+      activityType: data.activityType,
+      date: data.date,
+      startTime: data.startTime,
+      endTime: data.endTime,
     });
 
     const { data: createdRecord, errors } = await (client.models as any).ClubRecord.create(booking);
@@ -1698,6 +1715,77 @@ export async function queryFacilitiesForScheduling(adminSub: string): Promise<an
 // UNIFIED EXPORT: All functions exported here (ONE export default only)
 // ============================================================================
 
+
+/**
+ * Delete a booking record
+ * 
+ * Delete Pattern:
+ * - pk: <adminSub>
+ * - sk: BOOKING#<bookingId>#MEMBER#<memberPhone>#SCHEDULE#<scheduleId>
+ */
+export async function deleteBookingRecord(
+  adminSub: string,
+  bookingId: string,
+  memberPhone: string,
+  scheduleId: string
+): Promise<void> {
+  try {
+    const client = generateClient<Schema>();
+
+    const { data: deletedRecord, errors } = await (client.models as any).ClubRecord.delete({
+      pk: adminSub,
+      sk: `BOOKING#${bookingId}#MEMBER#${memberPhone}#SCHEDULE#${scheduleId}`,
+    });
+
+    if (errors) {
+      console.error('[DB Service] Amplify Delete Errors:', errors);
+      throw new Error(errors[0]?.message || 'Failed to delete booking');
+    }
+
+    if (!deletedRecord) {
+      throw new Error('Delete returned no data.');
+    }
+
+    console.log(`[DB Service] Booking ${bookingId} deleted successfully`);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to delete booking';
+    console.error('[DB Service] deleteBookingRecord error:', error);
+    throw new Error(`Failed to delete booking: ${message}`);
+  }
+}
+
+/**
+ * Query all bookings for a specific schedule
+ * 
+ * Query Pattern: GSI2 query (ZERO table scans)
+ * - gsi2pk: <adminSub>#SCHEDULE#<scheduleId>
+ * 
+ * @param adminSub Admin's Cognito SUB
+ * @param scheduleId Schedule ID to query bookings for
+ * @returns Array of booking records with member phone enrollment
+ */
+export async function queryBookingsBySchedule(
+  adminSub: string,
+  scheduleId: string
+): Promise<any[]> {
+  console.log(`[DB Service] Querying bookings for schedule: ${scheduleId}`);
+
+  const client = generateClient<Schema>();
+
+  try {
+    const result = await (client.models as any).ClubRecord.listByGsi2({
+      gsi2pk: `${adminSub}#SCHEDULE#${scheduleId}`,
+    });
+
+    const bookings = result.data || [];
+    console.log(`[DB Service] Found ${bookings.length} bookings for schedule ${scheduleId}`);
+    return bookings;
+  } catch (error) {
+    console.error('[DB Service] Failed to query bookings by schedule:', error);
+    return [];
+  }
+}
+
 export default {
   // CRUD Operations
   createMemberRecord,
@@ -1709,6 +1797,8 @@ export default {
   updateScheduleRecord,
   deleteScheduleRecord,
   createBookingRecord,
+  deleteBookingRecord,
+  queryBookingsBySchedule,
   createPackageRecord,
   createClaimRecord,
 
@@ -1749,3 +1839,45 @@ export default {
   updatePackageStatusRecord,
   getPackageEnrollmentStats,
 };
+
+/**
+ * Query all bookings for a specific member
+ *
+ * Query Pattern:
+ * - gsi1pk = <adminSub>#MEMBER#<memberPhone>
+ * - gsi1sk begins with BOOKING#
+ *
+ * @param adminSub Admin's Cognito SUB
+ * @param memberPhone Member's phone number
+ * @returns Array of Booking records
+ */
+export async function queryBookingsByMember(
+  adminSub: string,
+  memberPhone: string
+): Promise<any[]> {
+  try {
+    const client = generateClient<Schema>();
+
+    const result = await (client.models as any).ClubRecord.listByGsi1({
+      gsi1pk: `${adminSub}#MEMBER#${memberPhone}`,
+      gsi1sk: { beginsWith: 'BOOKING#' },
+    });
+
+    return (result.data || []).map((item: any) => ({
+      bookingId: item.sk?.replace('BOOKING#', ''),
+      scheduleId: item.scheduleId,
+      coachPhone: item.coachPhone,
+      memberPhone: item.memberPhone,
+      bookedAt: item.createdAt,
+      // Include denormalized schedule data stored on booking
+      activityType: item.activityType,
+      date: item.date,
+      startTime: item.startTime,
+      endTime: item.endTime,
+    }));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'Failed to query bookings';
+    console.error('queryBookingsByMember error:', error);
+    throw new Error(`Failed to query bookings for member: ${message}`);
+  }
+}

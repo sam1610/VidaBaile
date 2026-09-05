@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../hooks/useAppSync';
 import { CrmDashboard } from './CrmDashboard';
 import { MemberCrudModal } from './MemberCrudModal';
+import { MemberEnrollmentsModal } from './MemberEnrollmentsModal';
 import { useAdminSub } from '../../hooks';
 import { createMember, type Member } from '../../lib/models';
+import { observeSchedulesByDateRange, observeCoaches } from '../../services/DatabaseService';
 import './CRMTab.css';
 
 /**
@@ -22,8 +24,41 @@ export const CRMTab = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [selectedMember, setSelectedMember] = useState<Member | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [enrollmentsModalOpen, setEnrollmentsModalOpen] = useState(false);
+  const [selectedMemberForEnrollments, setSelectedMemberForEnrollments] = useState<Member | null>(null);
+  const [schedules, setSchedules] = useState<any[]>([]);
+  const [coaches, setCoaches] = useState<any[]>([]);
 
-  const handleAddMember = () => {
+
+  // Fetch schedules and coaches for the enrollments modal
+  useEffect(() => {
+    if (!adminSub) return;
+
+    // Get date range: 180 days back to 365 days forward
+    const today = new Date();
+    const startDate = new Date(today);
+    startDate.setDate(startDate.getDate() - 180);
+    const endDate = new Date(today);
+    endDate.setDate(endDate.getDate() + 365);
+
+    const startDateStr = startDate.toISOString().split('T')[0];
+    const endDateStr = endDate.toISOString().split('T')[0];
+
+    const unsubscribeSchedules = observeSchedulesByDateRange(adminSub, startDateStr, endDateStr, (data: any[]) => {
+      setSchedules(data.filter((item) => item.entityType === 'SCHEDULE') || []);
+    });
+
+    const unsubscribeCoaches = observeCoaches(adminSub, (data: any[]) => {
+      setCoaches(data.filter((item) => item.entityType === 'COACH') || []);
+    });
+
+    return () => {
+      unsubscribeSchedules();
+      unsubscribeCoaches();
+    };
+  }, [adminSub]);
+
+    const handleAddMember = () => {
     setSelectedMember(null);
     setSaveError(null);
     setModalOpen(true);
@@ -35,7 +70,18 @@ export const CRMTab = () => {
     setModalOpen(true);
   };
 
-  const closeModal = () => {
+
+  const handleViewEnrollments = (member: Member) => {
+    setSelectedMemberForEnrollments(member);
+    setEnrollmentsModalOpen(true);
+  };
+
+  const closeEnrollmentsModal = () => {
+    setEnrollmentsModalOpen(false);
+    setSelectedMemberForEnrollments(null);
+  };
+
+    const closeModal = () => {
     setModalOpen(false);
     setSelectedMember(null);
     setSaveError(null);
@@ -88,13 +134,20 @@ export const CRMTab = () => {
           + Add New Member
         </button>
       </div>
-      <CrmDashboard onEditMember={handleEditMember} />
+      <CrmDashboard onEditMember={handleEditMember} onViewEnrollments={handleViewEnrollments} />
       <MemberCrudModal
         isOpen={modalOpen}
         member={selectedMember}
         onClose={closeModal}
         onSave={handleSaveMember}
         error={saveError}
+      />
+      <MemberEnrollmentsModal
+        isOpen={enrollmentsModalOpen}
+        onClose={closeEnrollmentsModal}
+        member={selectedMemberForEnrollments}
+        schedules={schedules}
+        coaches={coaches}
       />
     </div>
   );

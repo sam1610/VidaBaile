@@ -6,12 +6,15 @@
   border: 1px solid #e0e0e0;
   border-radius: 4px;
   background: white;
+  -webkit-overflow-scrolling: touch; /* Smooth scroll on mobile */
 }
 
 .catalog-table {
   width: 100%;
+  min-width: 700px; /* Force minimum width wider than mobile screens */
   border-collapse: collapse;
   font-size: 12px;
+  table-layout: fixed; /* Ensure columns respect width constraints */
 }
 
 .catalog-table thead {
@@ -44,64 +47,37 @@
   vertical-align: middle;
 }
 
+/* Prevent text wrapping for data columns */
+.catalog-table td:nth-child(2),
+.catalog-table td:nth-child(3),
+.catalog-table td:nth-child(4),
+.catalog-table td:nth-child(5),
+.catalog-table td:nth-child(6) {
+  white-space: nowrap;
+}
+
+/* Allow wrapping for Package Name column */
+.catalog-table td:nth-child(1) {
+  min-width: 200px;
+  white-space: normal;
+}
+
 .catalog-table td:last-child {
   text-align: right;
 }
 
-/* Empty state */
-.catalog-table tbody tr:not(:first-child):not(:last-child) {
-  /* Regular rows */
+/* Ensure table elements maintain proper display */
+.catalog-table tbody,
+.catalog-table tr,
+.catalog-table td,
+.catalog-table th {
+  display: table-cell; /* Force proper table rendering */
 }
 
-/* Responsive */
-@media (max-width: 768px) {
-  .catalog-table-wrapper {
-    border: none;
-    border-radius: 0;
-  }
+.catalog-table tbody {
+  display: table-row-group;
+}
 
-  .catalog-table {
-    font-size: 11px;
-  }
-
-  .catalog-table th,
-  .catalog-table td {
-    padding: 8px;
-  }
-
-  .catalog-table thead {
-    display: none;
-  }
-
-  .catalog-table tbody,
-  .catalog-table tr,
-  .catalog-table td {
-    display: block;
-    width: 100%;
-  }
-
-  .catalog-table tr {
-    margin-bottom: 12px;
-    border: 1px solid #e0e0e0;
-    border-radius: 4px;
-    padding: 12px 0;
-  }
-
-  .catalog-table td {
-    text-align: right;
-    padding-left: 40%;
-    position: relative;
-    border: none;
-    padding: 8px 8px 8px 40%;
-  }
-
-  .catalog-table td:before {
-    content: attr(data-label);
-    position: absolute;
-    left: 8px;
-    font-weight: 600;
-    text-transform: uppercase;
-    font-size: 10px;
-    color: #999;
-  }
+.catalog-table tr {
+  display: table-row;
 }

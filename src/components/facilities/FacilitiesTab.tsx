@@ -1,10 +1,12 @@
-import { useEffect, useState } from 'react';
-import { getAdminSub } from '../../lib/auth-utils';
-import { observeFacilitiesRecord } from '../../services/DatabaseService';
+import { useEffect, useMemo, useState } from 'react';
+import { useAdminSub } from '../../hooks';
+import DatabaseService from '../../services/DatabaseService';
 import './FacilitiesTab.css';
 
 interface Facility {
   facilityId: string;
+  id?: string;
+  sk?: string;
   name: string;
   capacity: number;
   currentOccupancy: number;
@@ -13,223 +15,444 @@ interface Facility {
   status: 'ACTIVE' | 'INACTIVE' | 'MAINTENANCE';
 }
 
-const getOccupancyColor = (percent: number) => {
-  if (percent >= 80) return '#e74c3c';
-  if (percent >= 50) return '#f39c12';
-  return '#27ae60';
-};
+interface Schedule {
+  scheduleId: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  coachPhone: string;
+  facilityId: string;
+  activityType: string;
+  capacity: number;
+  level?: string;
+}
 
 /**
- * Determine availability based on occupancy
- * UNAVAILABLE if occupancy >= 90% of capacity
- * AVAILABLE otherwise
+ * FacilitiesTab: Visual facility scheduling dashboard with timeline grid
+ * 
+ * Features:
+ * - Facility selection cards with occupancy display
+ * - Date range picker
+ * - Timeline grid (Hours × Dates) with color-coded schedules
+ * - Real-time facility and schedule updates
+ * - Interactive facility selection
  */
-const isAvailable = (occupancy: number, capacity: number): boolean => {
-  const occupancyPercent = (occupancy / capacity) * 100;
-  return occupancyPercent < 90;
-};
-
 export const FacilitiesTab = () => {
+  const { adminSub, loading: adminLoading } = useAdminSub();
+
+  // Facility data
   const [facilities, setFacilities] = useState<Facility[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [facilitiesLoading, setFacilitiesLoading] = useState(false);
 
+  // Schedule data
+  const [schedules, setSchedules] = useState<Schedule[]>([]);
+  const [schedulesLoading, setSchedulesLoading] = useState(false);
+
+  // UI State
+  const [selectedFacilities, setSelectedFacilities] = useState<string[]>([]);
+  const [startDate, setStartDate] = useState<string>(getMonday(new Date()).toISOString().split('T')[0]);
+  const [endDate, setEndDate] = useState<string>(() => {
+    const end = new Date(getMonday(new Date()));
+    end.setDate(end.getDate() + 6);
+    return end.toISOString().split('T')[0];
+  });
+
+  // Fetch facilities on mount
   useEffect(() => {
-    let unsubscribe: (() => void) | null = null;
+    if (!adminSub) return;
 
-    const initializeSubscription = async () => {
+    const fetchFacilities = async () => {
+      setFacilitiesLoading(true);
       try {
-        const adminSub = await getAdminSub();
-        if (!adminSub) {
-          setError('Not authenticated');
-          setLoading(false);
-          return;
+        const facilityData = await DatabaseService.queryFacilitiesForScheduling(adminSub);
+        const mapped = Array.isArray(facilityData)
+          ? facilityData.map((f) => ({
+              facilityId: f.facilityId || f.id || f.sk?.replace('FACILITY#', ''),
+              id: f.id,
+              sk: f.sk,
+              name: f.name || 'Unknown',
+              capacity: f.capacity || 0,
+              currentOccupancy: f.currentOccupancy || 0,
+              location: f.location || '',
+              description: f.description || '',
+              status: f.status || 'ACTIVE',
+            }))
+          : [];
+        setFacilities(mapped);
+        // Auto-select all facilities on first load
+        if (selectedFacilities.length === 0 && mapped.length > 0) {
+          setSelectedFacilities(mapped.map((f) => f.facilityId));
         }
-
-        // Subscribe to real-time facility updates (GSI1 - NO TABLE SCAN)
-        unsubscribe = observeFacilitiesRecord(adminSub, (data: any[]) => {
-          // Filter to only FACILITY entities
-          const facilityList = data
-            .filter((item) => item.entityType === 'FACILITY' && item.sk?.startsWith('FACILITY#'))
-            .map((item) => ({
-              facilityId: item.facilityId || item.sk.replace(/^FACILITY#/, ''),
-              name: item.name,
-              capacity: item.capacity || 0,
-              currentOccupancy: item.currentOccupancy || 0,
-              location: item.location || '',
-              description: item.description || '',
-              status: item.status || 'ACTIVE',
-            }));
-
-          setFacilities(facilityList);
-          setLoading(false);
-        });
-      } catch (err) {
-        console.error('Failed to initialize facility subscription:', err);
-        setError(err instanceof Error ? err.message : 'Failed to load facilities');
-        setLoading(false);
+      } catch (error) {
+        console.error('Error fetching facilities:', error);
+        setFacilities([]);
+      } finally {
+        setFacilitiesLoading(false);
       }
     };
 
-    initializeSubscription();
+    fetchFacilities();
+  }, [adminSub]);
 
-    return () => {
-      if (unsubscribe) {
-        unsubscribe();
+  // Subscribe to schedules for the date range
+  useEffect(() => {
+    if (!adminSub || !startDate || !endDate) return;
+
+    setSchedulesLoading(true);
+    const unsubscribe = DatabaseService.observeSchedulesByDateRange(
+      adminSub,
+      startDate,
+      endDate,
+      (data: any[]) => {
+        const scheduleList = data
+          .filter((item) => item.entityType === 'SCHEDULE' && item.sk?.startsWith('SCHEDULE#'))
+          .map((item) => ({
+            scheduleId: item.scheduleId || item.sk.replace(/^SCHEDULE#/, ''),
+            date: item.date,
+            startTime: item.startTime,
+            endTime: item.endTime,
+            coachPhone: item.coachPhone,
+            facilityId: item.facilityId,
+            activityType: item.activityType || '',
+            capacity: item.capacity || 30,
+            level: item.level || 'Open Level',
+          }));
+        setSchedules(scheduleList);
+        setSchedulesLoading(false);
       }
-    };
+    );
+
+    return () => unsubscribe();
+  }, [adminSub, startDate, endDate]);
+
+  // Assign colors to facilities
+  const facilityColorMap = useMemo(() => {
+    const colors = ['#FF6B6B', '#4ECDC4', '#45B7D1', '#FFA07A', '#98D8C8', '#F7DC6F', '#BB8FCE', '#85C1E2'];
+    const map: Record<string, string> = {};
+    facilities.forEach((facility, index) => {
+      map[facility.facilityId] = colors[index % colors.length];
+    });
+    return map;
+  }, [facilities]);
+
+  // Filter schedules by selected facilities
+  const filteredSchedules = useMemo(() => {
+    return schedules.filter((s) => selectedFacilities.includes(s.facilityId));
+  }, [schedules, selectedFacilities]);
+
+  // Generate date columns
+  const dateColumns = useMemo(() => {
+    const dates: string[] = [];
+    const current = new Date(startDate);
+    const end = new Date(endDate);
+    while (current <= end) {
+      dates.push(current.toISOString().split('T')[0]);
+      current.setDate(current.getDate() + 1);
+    }
+    return dates;
+  }, [startDate, endDate]);
+
+  // Generate time slots (8:00 - 22:00 hourly)
+  const timeSlots = useMemo(() => {
+    const slots: string[] = [];
+    for (let hour = 8; hour < 22; hour++) {
+      slots.push(`${String(hour).padStart(2, '0')}:00`);
+    }
+    return slots;
   }, []);
 
-  if (loading) {
-    return (
-      <div style={{ padding: '16px' }}>
-        <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: '700' }}>🏛️ FACILITIES & ROOMS</h2>
-        <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>Loading facilities...</div>
-      </div>
+  // Toggle facility selection
+  const toggleFacility = (facilityId: string) => {
+    setSelectedFacilities((prev) =>
+      prev.includes(facilityId) ? prev.filter((id) => id !== facilityId) : [...prev, facilityId]
     );
-  }
+  };
 
-  if (error) {
-    return (
-      <div style={{ padding: '16px' }}>
-        <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: '700' }}>🏛️ FACILITIES & ROOMS</h2>
-        <div style={{ padding: '20px', textAlign: 'center', color: '#e74c3c' }}>{error}</div>
-      </div>
+  // Get occupancy color
+  const getOccupancyColor = (percent: number) => {
+    if (percent >= 80) return '#e74c3c';
+    if (percent >= 50) return '#f39c12';
+    return '#27ae60';
+  };
+
+  // Get schedules for a specific time slot and date
+  const getSchedulesForCell = (date: string, timeSlot: string) => {
+    const hour = parseInt(timeSlot.split(':')[0]);
+    return filteredSchedules.filter(
+      (schedule) => schedule.date === date && parseInt(schedule.startTime.split(':')[0]) === hour
     );
-  }
+  };
 
-  if (facilities.length === 0) {
+  if (adminLoading) {
     return (
       <div style={{ padding: '16px' }}>
         <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: '700' }}>🏛️ FACILITIES & ROOMS</h2>
-        <div style={{ padding: '20px', textAlign: 'center', color: '#666' }}>
-          No facilities configured. Go to Settings to add facilities.
-        </div>
+        <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}>Loading...</div>
       </div>
     );
   }
 
   return (
-    <div style={{ padding: '16px' }}>
-      <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: '700' }}>🏛️ FACILITIES & ROOMS</h2>
+    <div style={{ padding: '16px', display: 'flex', flexDirection: 'column', gap: '24px' }}>
+      {/* Header */}
+      <h2 style={{ margin: '0', fontSize: '14px', fontWeight: '700', color: '#2e3b50' }}>
+        🏛️ FACILITIES & ROOMS
+      </h2>
 
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '16px' }}>
-        {facilities.map((facility) => {
-          const occupancyPercent = facility.capacity > 0 ? (facility.currentOccupancy / facility.capacity) * 100 : 0;
-          const available = isAvailable(facility.currentOccupancy, facility.capacity);
+      {/* Facility Selection Cards */}
+      <div>
+        <div style={{ fontSize: '12px', fontWeight: '600', color: '#2e3b50', marginBottom: '12px' }}>
+          SELECT FACILITIES
+        </div>
+        {facilitiesLoading ? (
+          <div style={{ color: '#999', fontSize: '12px' }}>Loading facilities...</div>
+        ) : facilities.length === 0 ? (
+          <div style={{ color: '#999', fontSize: '12px' }}>No facilities available</div>
+        ) : (
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+            {facilities.map((facility) => {
+              const isSelected = selectedFacilities.includes(facility.facilityId);
+              const occupancyPercent =
+                facility.capacity > 0 ? (facility.currentOccupancy / facility.capacity) * 100 : 0;
 
-          return (
-            <div
-              key={facility.facilityId}
-              style={{
-                background: 'white',
-                border: '1px solid #e0e0e0',
-                borderRadius: '4px',
-                padding: '16px',
-                boxShadow: '0 1px 2px rgba(0,0,0,0.05)',
-                position: 'relative',
-              }}
-            >
-              {/* Availability Status Header */}
-              <div
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  marginBottom: '12px',
-                  paddingBottom: '12px',
-                  borderBottom: '1px solid #f0f0f0',
-                }}
-              >
-                <div style={{ fontSize: '14px', fontWeight: '600', color: '#2e3b50' }}>{facility.name}</div>
+              return (
                 <div
+                  key={facility.facilityId}
+                  onClick={() => toggleFacility(facility.facilityId)}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '6px',
+                    border: isSelected ? '2px solid #2196F3' : '1px solid #ddd',
+                    borderRadius: '4px',
+                    padding: '12px',
+                    background: 'white',
+                    cursor: 'pointer',
+                    transition: 'all 0.2s',
+                    position: 'relative',
+                    boxShadow: isSelected ? '0 2px 8px rgba(33, 150, 243, 0.15)' : '0 1px 2px rgba(0,0,0,0.05)',
+                  }}
+                >
+                  {/* Selection checkmark */}
+                  {isSelected && (
+                    <div
+                      style={{
+                        position: 'absolute',
+                        top: '8px',
+                        right: '8px',
+                        background: '#2196F3',
+                        color: 'white',
+                        width: '20px',
+                        height: '20px',
+                        borderRadius: '3px',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        fontSize: '12px',
+                        fontWeight: 'bold',
+                      }}
+                    >
+                      ✓
+                    </div>
+                  )}
+
+                  {/* Facility Name */}
+                  <div style={{ fontSize: '12px', fontWeight: '600', color: '#2e3b50', marginBottom: '8px' }}>
+                    {facility.name}
+                  </div>
+
+                  {/* Details */}
+                  <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>
+                    <strong>Location:</strong> {facility.location || 'N/A'}
+                  </div>
+                  <div style={{ fontSize: '11px', color: '#666', marginBottom: '8px' }}>
+                    <strong>Capacity:</strong> {facility.capacity}
+                  </div>
+
+                  {/* Occupancy Bar */}
+                  <div style={{ marginBottom: '8px' }}>
+                    <div style={{ fontSize: '10px', color: '#666', marginBottom: '4px' }}>Occupancy</div>
+                    <div
+                      style={{
+                        height: '6px',
+                        background: '#e0e0e0',
+                        borderRadius: '3px',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <div
+                        style={{
+                          height: '100%',
+                          width: `${occupancyPercent}%`,
+                          background: getOccupancyColor(occupancyPercent),
+                          transition: 'width 0.3s',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Occupancy Number */}
+                  <div style={{ fontSize: '10px', color: '#1a1a1a', fontWeight: '500' }}>
+                    {facility.currentOccupancy} / {facility.capacity} people
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Date Range Picker */}
+      <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <label style={{ fontSize: '12px', fontWeight: '600', color: '#2e3b50' }}>From:</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            style={{
+              padding: '6px 8px',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              fontSize: '12px',
+            }}
+          />
+        </div>
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <label style={{ fontSize: '12px', fontWeight: '600', color: '#2e3b50' }}>To:</label>
+          <input
+            type="date"
+            value={endDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            style={{
+              padding: '6px 8px',
+              border: '1px solid #ddd',
+              borderRadius: '4px',
+              fontSize: '12px',
+            }}
+          />
+        </div>
+      </div>
+
+      {/* Timeline Grid */}
+      <div style={{ overflowX: 'auto', border: '1px solid #ddd', borderRadius: '4px', background: 'white' }}>
+        <table className="timeline-grid-table">
+          <thead>
+            <tr>
+              <th style={{ width: '80px', minWidth: '80px' }}>Time</th>
+              {dateColumns.map((date) => (
+                <th
+                  key={date}
+                  style={{
+                    minWidth: '150px',
+                    padding: '8px 4px',
+                    textAlign: 'center',
+                    borderRight: '1px solid #e0e0e0',
+                  }}
+                >
+                  <div style={{ fontSize: '11px', fontWeight: '600', color: '#2e3b50' }}>
+                    {new Date(date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
+                  </div>
+                  <div style={{ fontSize: '10px', color: '#666' }}>
+                    {new Date(date).toLocaleDateString('en-US', { weekday: 'short' })}
+                  </div>
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {schedulesLoading ? (
+              <tr>
+                <td colSpan={dateColumns.length + 1} style={{ textAlign: 'center', padding: '20px', color: '#999' }}>
+                  Loading schedules...
+                </td>
+              </tr>
+            ) : timeSlots.map((timeSlot) => (
+              <tr key={timeSlot}>
+                <td
+                  style={{
+                    padding: '12px 8px',
                     fontSize: '12px',
                     fontWeight: '600',
-                    color: available ? '#27ae60' : '#e74c3c',
-                    padding: '4px 8px',
-                    borderRadius: '3px',
-                    background: available ? '#f0f8f4' : '#fef5f5',
+                    color: '#2e3b50',
+                    background: '#f9f9f9',
+                    borderRight: '1px solid #e0e0e0',
                   }}
                 >
-                  <span style={{ fontSize: '14px' }}>{available ? '✓' : '✗'}</span>
-                  <span>{available ? 'Available' : 'Unavailable'}</span>
-                </div>
-              </div>
-
-              {/* Location & Description */}
-              {facility.location && (
-                <div style={{ fontSize: '11px', color: '#666', marginBottom: '4px' }}>
-                  <strong>Location:</strong> {facility.location}
-                </div>
-              )}
-              {facility.description && (
-                <div style={{ fontSize: '11px', color: '#666', marginBottom: '8px' }}>
-                  <strong>Description:</strong> {facility.description}
-                </div>
-              )}
-
-              {/* Capacity Info */}
-              <div style={{ fontSize: '12px', color: '#2e3b50', marginBottom: '12px', fontWeight: '500' }}>
-                <div style={{ marginBottom: '4px' }}>
-                  <strong>Capacity:</strong> {facility.capacity} people
-                </div>
-              </div>
-
-              {/* Occupancy Bar */}
-              <div style={{ marginBottom: '12px' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '6px', fontSize: '12px' }}>
-                  <span style={{ color: '#666', fontWeight: '500' }}>Occupancy</span>
-                  <span style={{ fontWeight: '600', color: getOccupancyColor(occupancyPercent) }}>
-                    {Math.round(occupancyPercent)}%
-                  </span>
-                </div>
-                <div
-                  style={{
-                    height: '8px',
-                    background: '#e0e0e0',
-                    borderRadius: '4px',
-                    overflow: 'hidden',
-                  }}
-                >
-                  <div
-                    style={{
-                      height: '100%',
-                      width: `${occupancyPercent}%`,
-                      background: getOccupancyColor(occupancyPercent),
-                      transition: 'width 0.3s',
-                    }}
-                  ></div>
-                </div>
-              </div>
-
-              {/* Current Occupancy */}
-              <div style={{ fontSize: '12px', color: '#1a1a1a', fontWeight: '500', marginBottom: '8px' }}>
-                {facility.currentOccupancy} / {facility.capacity} people
-              </div>
-
-              {/* Status Badge */}
-              <div
-                style={{
-                  display: 'inline-block',
-                  fontSize: '10px',
-                  fontWeight: '600',
-                  padding: '4px 8px',
-                  borderRadius: '3px',
-                  background: facility.status === 'ACTIVE' ? '#f0f8f4' : facility.status === 'INACTIVE' ? '#f5f5f5' : '#fef5f5',
-                  color: facility.status === 'ACTIVE' ? '#27ae60' : facility.status === 'INACTIVE' ? '#666' : '#e74c3c',
-                  textTransform: 'uppercase',
-                }}
-              >
-                {facility.status}
-              </div>
-            </div>
-          );
-        })}
+                  {timeSlot}
+                </td>
+                {dateColumns.map((date) => {
+                  const cellSchedules = getSchedulesForCell(date, timeSlot);
+                  return (
+                    <td
+                      key={`${date}-${timeSlot}`}
+                      style={{
+                        minWidth: '150px',
+                        padding: '8px 4px',
+                        borderRight: '1px solid #e0e0e0',
+                        borderBottom: '1px solid #e0e0e0',
+                        background: '#fafafa',
+                        verticalAlign: 'top',
+                      }}
+                    >
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                        {cellSchedules.map((schedule) => (
+                          <div
+                            key={schedule.scheduleId}
+                            style={{
+                              background: facilityColorMap[schedule.facilityId],
+                              color: 'white',
+                              padding: '6px 8px',
+                              borderRadius: '3px',
+                              fontSize: '11px',
+                              fontWeight: '500',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '2px',
+                            }}
+                          >
+                            <div style={{ fontWeight: '600' }}>{schedule.activityType}</div>
+                            <div style={{ fontSize: '10px', opacity: 0.9 }}>
+                              {schedule.startTime} - {schedule.endTime}
+                            </div>
+                            <div style={{ fontSize: '10px', opacity: 0.85 }}>
+                              0 / {schedule.capacity}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    </td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
+
+      {/* Empty State */}
+      {selectedFacilities.length === 0 && (
+        <div
+          style={{
+            background: '#f9f9f9',
+            border: '1px solid #e0e0e0',
+            borderRadius: '4px',
+            padding: '40px 20px',
+            textAlign: 'center',
+            color: '#999',
+          }}
+        >
+          <div style={{ fontSize: '14px', fontWeight: '500', marginBottom: '8px' }}>No facilities selected</div>
+          <div style={{ fontSize: '12px' }}>Select at least one facility above to view the schedule timeline</div>
+        </div>
+      )}
     </div>
   );
 };
+
+/**
+ * Get Monday of the current week
+ */
+function getMonday(date: Date): Date {
+  const d = new Date(date);
+  const day = d.getDay();
+  const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+  return new Date(d.setDate(diff));
+}

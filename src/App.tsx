@@ -124,7 +124,14 @@ function App(): React.ReactElement {
       */}
       <Authenticator>
         {() => (
-          <View>
+          <div style={{ 
+            display: 'flex', 
+            flexDirection: 'column', 
+            height: '100dvh', 
+            width: '100%', 
+            backgroundColor: '#f9fafb',
+            overflow: 'hidden'
+          }}>
             {/*
               Insufficient-permissions banner.
               Displayed when AppSync returns a 401/403 / Unauthorized error.
@@ -132,23 +139,28 @@ function App(): React.ReactElement {
               by child components calling clearPermissionsError().
             */}
             {showPermissionsError && (
-              <Alert
-                variation="error"
-                isDismissible={true}
-                hasIcon={true}
-                heading="Insufficient permissions"
-                onDismiss={() => {
-                  setShowPermissionsError(false);
-                }}
-              >
-                Your account does not have permission to perform this action.
-                Please contact your administrator.
-              </Alert>
+              <View style={{ 
+                flexShrink: 0,
+                zIndex: 50
+              }}>
+                <Alert
+                  variation="error"
+                  isDismissible={true}
+                  hasIcon={true}
+                  heading="Insufficient permissions"
+                  onDismiss={() => {
+                    setShowPermissionsError(false);
+                  }}
+                >
+                  Your account does not have permission to perform this action.
+                  Please contact your administrator.
+                </Alert>
+              </View>
             )}
 
             {/* Main tab navigation — renders after Cognito authentication */}
             <AppTabs />
-          </View>
+          </div>
         )}
       </Authenticator>
     </PermissionsErrorContext.Provider>

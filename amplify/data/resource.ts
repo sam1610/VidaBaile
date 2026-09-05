@@ -185,6 +185,7 @@ const schema = a.schema({
       facilityId: a.string(),         // facility-001
       activityType: a.string(),       // "Salsa Beginner", "Bachata Advanced"
       capacity: a.integer(),          // 20 (max attendees)
+      currentOccupancy: a.integer(),  // Current enrollment count (denormalized from BOOKING records)
 
       /** BOOKING Attributes */
       coachPhone: a.string(),         // Reference to coach (used in BOOKING records)
@@ -208,7 +209,6 @@ const schema = a.schema({
       // FACILITY-specific (Dancing Halls)
       location: a.string(),           // Address or location descriptor
       description: a.string(),        // Facility details, amenities
-      currentOccupancy: a.integer(),  // Current number of people (0-capacity)
       creditsConsumed: a.integer(),   // 1 (per session)
     })
     .identifier(['pk', 'sk'])

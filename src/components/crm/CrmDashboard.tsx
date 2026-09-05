@@ -12,6 +12,7 @@ interface SortConfig {
 
 interface CrmDashboardProps {
   onEditMember?: (member: Member) => void;
+  onViewEnrollments?: (member: Member) => void;
 }
 
 /**
@@ -29,7 +30,7 @@ interface CrmDashboardProps {
  * - Sortable columns with visual indicators
  * - Icon-based actions with tooltips
  */
-export const CrmDashboard = ({ onEditMember }: CrmDashboardProps) => {
+export const CrmDashboard = ({ onEditMember, onViewEnrollments }: CrmDashboardProps) => {
   // Fetch admin's Cognito SUB (partition key) with auth guard
   const { adminSub, loading: adminLoading, error: adminError } = useAdminSub();
 
@@ -291,7 +292,11 @@ export const CrmDashboard = ({ onEditMember }: CrmDashboardProps) => {
               sortedMembers.map((member) => {
                 const statusDisplay = getStatusDisplay(member.status);
                 return (
-                  <tr key={member.phone} className="data-row">
+                  <tr 
+                    key={member.phone} 
+                    className="data-row cursor-pointer hover:bg-blue-50 transition-colors"
+                    onClick={() => onViewEnrollments?.(member)}
+                  >
                     <td className="cell-name">{member.name || '—'}</td>
                     <td className="cell-phone">{member.phone || '—'}</td>
                     <td className="cell-tier">
@@ -310,9 +315,13 @@ export const CrmDashboard = ({ onEditMember }: CrmDashboardProps) => {
                     <td className="cell-actions">
                       <button
                         className="icon-button edit-btn"
-                        onClick={() => onEditMember?.(member)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          onEditMember?.(member);
+                        }}
                         title="Edit member"
                         aria-label={`Edit ${member.name}`}
+                        style={{ display: 'inline-flex' }}
                       >
                         ✏️
                       </button>

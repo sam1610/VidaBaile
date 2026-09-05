@@ -114,13 +114,11 @@
 }
 
 .cell-tier {
-  display: inline-block;
+  /* table cell - no display override needed */
 }
 
 .cell-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
+  /* table cell - let status badge handle its own display */
 }
 
 .status-badge {
@@ -136,6 +134,11 @@
   font-size: 12px;
 }
 
+.data-table th.actions-col {
+  text-align: center;
+  padding: 12px 14px;
+}
+
 .cell-date {
   color: #999;
   font-size: 11px;
@@ -145,9 +148,7 @@
 .cell-actions {
   text-align: center;
   white-space: nowrap;
-  display: flex;
-  gap: 4px;
-  justify-content: flex-start;
+  padding: 12px 14px !important;
 }
 
 /* ============================================================================

@@ -91,7 +91,7 @@ export function PackageCatalogTable({
 
             return (
               <tr key={catalog.packageId} style={{ opacity: expired ? 0.6 : 1 }}>
-                <td>
+                <td style={{ minWidth: '200px' }}>
                   <div style={{ fontWeight: '600', fontSize: '12px', color: '#2e3b50' }}>
                     {catalog.name}
                   </div>
@@ -108,21 +108,17 @@ export function PackageCatalogTable({
                     </div>
                   )}
                 </td>
-                <td>
-                  <span style={{ fontWeight: '600', color: '#27ae60' }}>
-                    ${catalog.price.toFixed(2)}
-                  </span>
+                <td style={{ whiteSpace: 'nowrap', fontWeight: '600', color: '#27ae60' }}>
+                  ${catalog.price.toFixed(2)}
                 </td>
-                <td style={{ textAlign: 'center' }}>
-                  <span style={{ fontWeight: '600', color: '#2e3b50' }}>
-                    {catalog.totalCredits}
-                  </span>
+                <td style={{ textAlign: 'center', whiteSpace: 'nowrap', fontWeight: '600', color: '#2e3b50' }}>
+                  {catalog.totalCredits}
                 </td>
-                <td style={{ fontSize: '11px', color: '#666' }}>
+                <td style={{ fontSize: '11px', color: '#666', whiteSpace: 'nowrap' }}>
                   <div>{catalog.validFrom}</div>
                   <div style={{ marginTop: '2px' }}>{catalog.validUntil}</div>
                 </td>
-                <td>
+                <td style={{ whiteSpace: 'nowrap' }}>
                   <div
                     style={{
                       display: 'inline-block',
@@ -138,7 +134,7 @@ export function PackageCatalogTable({
                     {expired ? 'EXPIRED' : catalog.status}
                   </div>
                 </td>
-                <td>
+                <td style={{ whiteSpace: 'nowrap' }}>
                   <div style={{ display: 'flex', gap: '6px', justifyContent: 'flex-end', alignItems: 'center' }}>
                     {/* Edit Button: Pencil Icon with Transparent Background */}
                     <button

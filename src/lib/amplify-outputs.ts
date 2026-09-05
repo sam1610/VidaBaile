@@ -189,6 +189,13 @@ const amplifyOutputs: any = {
               "isRequired": false,
               "attributes": []
             },
+            "currentOccupancy": {
+              "name": "currentOccupancy",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
             "coachPhone": {
               "name": "coachPhone",
               "isArray": false,
@@ -277,13 +284,6 @@ const amplifyOutputs: any = {
               "name": "description",
               "isArray": false,
               "type": "String",
-              "isRequired": false,
-              "attributes": []
-            },
-            "currentOccupancy": {
-              "name": "currentOccupancy",
-              "isArray": false,
-              "type": "Int",
               "isRequired": false,
               "attributes": []
             },
