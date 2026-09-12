@@ -4,18 +4,15 @@ import { KPIBox } from '../home/components/KPIBox';
 import { useAdminSub } from '../../hooks';
 import DatabaseService from '../../services/DatabaseService';
 import { PackageCatalogTable } from './PackageCatalogTable';
-import { PackageCatalogModal } from './PackageCatalogModal';
+import { PackageCatalogModal, type CatalogSubmitData } from './PackageCatalogModal';
 import './POSPackagesTab.css';
 
 interface CatalogTemplate {
   packageId: string;
   name: string;
-  totalCredits: number;
   price: number;
-  validFrom: string;
-  validUntil: string;
-  status: 'ACTIVE' | 'INACTIVE' | 'DEPRECATED';
-  description?: string;
+  totalCredits: number;
+  packageKnowledgeBase?: string;
 }
 
 /**
@@ -40,9 +37,6 @@ export const POSPackagesTab = () => {
   const [editingCatalog, setEditingCatalog] = useState<CatalogTemplate | undefined>();
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  // Catalog filter
-  const [catalogFilter, setCatalogFilter] = useState<'all' | 'active' | 'expired'>('all');
-
   // Subscribe to catalog updates
   useEffect(() => {
     if (!adminSub) return;
@@ -52,14 +46,11 @@ export const POSPackagesTab = () => {
       const templates = data
         .filter((item) => item.entityType === 'CATALOG')
         .map((item) => ({
-          packageId: item.packageId,
-          name: item.name,
-          totalCredits: item.totalCredits,
-          price: item.price,
-          validFrom: item.validFrom,
-          validUntil: item.validUntil,
-          status: item.status,
-          description: item.description,
+          packageId:            item.packageId,
+          name:                 item.name,
+          price:                item.price,
+          totalCredits:         item.totalCredits,
+          packageKnowledgeBase: item.packageKnowledgeBase,
         }));
       setCatalogs(templates);
       setCatalogLoading(false);
@@ -70,39 +61,22 @@ export const POSPackagesTab = () => {
     };
   }, [adminSub]);
 
-  // Calculate KPIs
-  const today = new Date();
-  const todayStr = today.toISOString().split('T')[0];
-
+  // KPIs
   const kpis = useMemo(() => {
     const totalRevenue = catalogs.reduce((sum, c) => sum + c.price, 0);
-    const activeCount = catalogs.filter((c) => c.status === 'ACTIVE' && c.validUntil >= todayStr).length;
-
-    const sevenDaysFromNow = new Date(today);
-    sevenDaysFromNow.setDate(sevenDaysFromNow.getDate() + 7);
-    const sevenDaysStr = sevenDaysFromNow.toISOString().split('T')[0];
-
-    const expiringCount = catalogs.filter((c) => {
-      return c.status === 'ACTIVE' && c.validUntil >= todayStr && c.validUntil <= sevenDaysStr;
-    }).length;
-
     return {
-      totalRevenue: totalRevenue.toFixed(2),
-      activeCount,
+      totalRevenue:   totalRevenue.toFixed(2),
       totalTemplates: catalogs.length,
-      expiringCount,
     };
-  }, [catalogs, todayStr, today]);
+  }, [catalogs]);
 
   // Handle create/update modal submission
-  const handleModalSubmit = async (data: any, packageId?: string) => {
+  const handleModalSubmit = async (data: CatalogSubmitData, packageId?: string) => {
     setIsSubmitting(true);
     try {
       if (packageId) {
-        // Update existing
         await DatabaseService.updateCatalogTemplate(adminSub!, packageId, data);
       } else {
-        // Create new
         const newPackageId = nanoid();
         await DatabaseService.createCatalogTemplate(adminSub!, newPackageId, data);
       }
@@ -156,25 +130,11 @@ export const POSPackagesTab = () => {
             color="success"
           />
           <KPIBox
-            title="Active Packages"
-            value={kpis.activeCount.toString()}
-            unit="Available"
-            trend="neutral"
-            color="primary"
-          />
-          <KPIBox
             title="Total Templates"
             value={kpis.totalTemplates.toString()}
             unit="Packages"
             trend="neutral"
             color="primary"
-          />
-          <KPIBox
-            title="Expiring This Week"
-            value={kpis.expiringCount.toString()}
-            unit="Packages"
-            trend={kpis.expiringCount > 0 ? 'down' : 'neutral'}
-            color="danger"
           />
         </div>
       </div>
@@ -202,33 +162,7 @@ export const POSPackagesTab = () => {
           </button>
         </div>
 
-        {/* Catalog Filter Tabs */}
-        <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-          {(['all', 'active', 'expired'] as const).map((tab) => (
-            <button
-              key={tab}
-              onClick={() => setCatalogFilter(tab)}
-              style={{
-                padding: '6px 12px',
-                background: catalogFilter === tab ? '#2e3b50' : '#f0f0f0',
-                color: catalogFilter === tab ? 'white' : '#666',
-                border: 'none',
-                borderRadius: '4px',
-                cursor: 'pointer',
-                fontSize: '12px',
-                fontWeight: '600',
-              }}
-            >
-              {tab.charAt(0).toUpperCase() + tab.slice(1)} ({
-                tab === 'all'
-                  ? catalogs.length
-                  : tab === 'active'
-                    ? catalogs.filter((c) => c.status === 'ACTIVE' && c.validUntil >= todayStr).length
-                    : catalogs.filter((c) => c.validUntil < todayStr || c.status === 'DEPRECATED').length
-              })
-            </button>
-          ))}
-        </div>
+
 
         {/* Catalog Table */}
         {catalogs.length === 0 ? (
@@ -264,7 +198,6 @@ export const POSPackagesTab = () => {
           <PackageCatalogTable
             catalogs={catalogs}
             onEdit={handleEditCatalog}
-            filterTab={catalogFilter}
           />
         )}
       </div>

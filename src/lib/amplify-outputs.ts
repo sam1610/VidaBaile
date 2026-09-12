@@ -273,6 +273,118 @@ const amplifyOutputs: any = {
               "isRequired": false,
               "attributes": []
             },
+            "whatsappMessageId": {
+              "name": "whatsappMessageId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "isRead": {
+              "name": "isRead",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false,
+              "attributes": []
+            },
+            "hasReplied": {
+              "name": "hasReplied",
+              "isArray": false,
+              "type": "Boolean",
+              "isRequired": false,
+              "attributes": []
+            },
+            "chatAnalysis": {
+              "name": "chatAnalysis",
+              "isArray": false,
+              "type": "AWSJSON",
+              "isRequired": false,
+              "attributes": []
+            },
+            "deliveryStatus": {
+              "name": "deliveryStatus",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "lastInteractionAt": {
+              "name": "lastInteractionAt",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "broadcastStatus": {
+              "name": "broadcastStatus",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "launchDateTime": {
+              "name": "launchDateTime",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "packageRef": {
+              "name": "packageRef",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "campaignKnowledgeBase": {
+              "name": "campaignKnowledgeBase",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "targetingOptions": {
+              "name": "targetingOptions",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "broadcastType": {
+              "name": "broadcastType",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "promotionalContent": {
+              "name": "promotionalContent",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
+            "targetMemberCount": {
+              "name": "targetMemberCount",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "sentCount": {
+              "name": "sentCount",
+              "isArray": false,
+              "type": "Int",
+              "isRequired": false,
+              "attributes": []
+            },
+            "packageKnowledgeBase": {
+              "name": "packageKnowledgeBase",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
             "location": {
               "name": "location",
               "isArray": false,
@@ -398,7 +510,9 @@ const amplifyOutputs: any = {
             "PACKAGE",
             "CLAIM",
             "FACILITY",
-            "CATALOG"
+            "CATALOG",
+            "BROADCAST",
+            "BROADCAST_RECEIPT"
           ]
         }
       },

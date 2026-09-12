@@ -1,300 +1,333 @@
 import { defineBackend } from '@aws-amplify/backend';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
 import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda';
+import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
+import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets';
+import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
+import { Queue } from 'aws-cdk-lib/aws-sqs';
 import { Fn } from 'aws-cdk-lib';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
-import { whatsappWebhookFn } from './functions/whatsapp-webhook/resource';
-import { strandsAgentFn } from './functions/strands-agent/resource';
-import { bookCoachFn } from './functions/book-coach/resource';
-import { payPackageFn } from './functions/pay-package/resource';
-import { postponeSessionFn } from './functions/postpone-session/resource';
-import { queryMembershipFn } from './functions/query-membership/resource';
-import { broadcastMarketingFn } from './functions/broadcast-marketing/resource';
+import { vidaBaileWhatsapp } from './functions/vidaBaileWhatsapp/resource';
+import { vidaBailePayPackage } from './functions/vidaBailePayPackage/resource';
+import { vidaBaileChatAgent } from './functions/vidaBaileChatAgent/resource';
+import { vidaBaileProcessOutboundQueue } from './functions/vidaBaileProcessOutboundQueue/resource';
+import { vidaBaileDispatchBroadcast } from './functions/vidaBaileDispatchBroadcast/resource';
+import { vidaBaileCampaignScheduler } from './functions/vidaBaileCampaignScheduler/resource';
 
 export const backend = defineBackend({
   auth,
   data,
-  whatsappWebhookFn,
-  strandsAgentFn,
-  bookCoachFn,
-  payPackageFn,
-  postponeSessionFn,
-  queryMembershipFn,
-  broadcastMarketingFn,
+  vidaBaileWhatsapp,
+  vidaBailePayPackage,
+  vidaBaileChatAgent,
+  vidaBaileProcessOutboundQueue,
+  vidaBaileDispatchBroadcast,
+  vidaBaileCampaignScheduler,
 });
 
 // ── Cognito password policy override ────────────────────────────────────────
-// defineAuth does not expose passwordPolicy directly — override via CDK escape
-// hatch to satisfy Requirement 4.5.
 const { cfnUserPool } = backend.auth.resources.cfnResources;
 cfnUserPool.addPropertyOverride('Policies.PasswordPolicy', {
   MinimumLength: 8,
-  
   RequireLowercase: true,
   RequireUppercase: true,
   RequireNumbers: true,
   RequireSymbols: true,
 });
 
-// ── Resolve shared ARN tokens ────────────────────────────────────────────────
-// All ARNs are stack-scoped CDK token references — never hardcoded values.
-// They are resolved at CloudFormation synthesis / deploy time.
-// Use Fn.sub() to defer token resolution until synthesis time.
+// ─────────────────────────────────────────────────────────────────────────────
+// CRITICAL: DynamoDB Table & SQS Queue Configuration
+// ─────────────────────────────────────────────────────────────────────────────
+// All Lambda functions target the VidaBaile ClubRecord table.
+// Single-Table Design (STD):
+//   - pk: adminSub (Cognito SUB, multi-tenant partition)
+//   - sk: MEMBER#<phone>, BROADCAST#<id>, BROADCAST#<id>#MEMBER#<phone>
+//   - gsi1pk / gsi1sk: Reverse lookups, cross-entity queries
+//   - gsi2pk / gsi2sk: Temporal and relational queries
+//
+// SQS queues (inbound-chat-queue, outbound-broadcast-queue) are preserved.
+// ─────────────────────────────────────────────────────────────────────────────
 
-// Get region and account from the AppSync API ARN (which is a token)
-const appSyncArn = backend.data.resources.graphqlApi.arn;
+// Dynamic table reference from AppSync data resources
+const clubRecordTable = backend.data.resources.tables['ClubRecord'];
+const CLUBRECORD_TABLE_ARN = clubRecordTable.tableArn;
+const CLUBRECORD_GSI1_ARN = Fn.sub('${TableArn}/index/clubRecordsByGsi1pkAndGsi1sk', {
+  TableArn: CLUBRECORD_TABLE_ARN,
+});
+const CLUBRECORD_GSI2_ARN = Fn.sub('${TableArn}/index/clubRecordsByGsi2pkAndGsi2sk', {
+  TableArn: CLUBRECORD_TABLE_ARN,
+});
 
-// DancingClubData table ARN and GSI1 ARN (using Fn.sub for deferred resolution)
-// Format: arn:aws:dynamodb:REGION:ACCOUNT:table/DancingClubData
-const tableArn = Fn.sub('arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/DancingClubData');
-const gsi1Arn = Fn.sub('${TableArn}/index/GSI1', { TableArn: tableArn });
+// Bedrock ARNs — Nova Pro (primary reply) + Nova Micro (analysis, per architecture steering doc)
+const bedrockClaudeArn = Fn.sub(
+  'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-pro-v1:0'
+);
+const bedrockNovaMicroArn = Fn.sub(
+  'arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-micro-v1:0'
+);
 
-// Secret ARNs (also using Fn.sub for consistency)
-const whatsappSecretArn = Fn.sub('arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vidabaile/whatsapp-token*');
-const paymentSecretArn = Fn.sub('arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vidabaile/payment-credentials*');
-const pinpointSecretArn = Fn.sub('arn:aws:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:vidabaile/pinpoint-credentials*');
-const pinpointAppArn = Fn.sub('arn:aws:mobiletargeting:${AWS::Region}:${AWS::AccountId}:apps/*');
+// SQS Queue ARNs (preserved from existing topology)
+const inboundChatQueueArn = Fn.sub(
+  'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:inbound-chat-queue'
+);
+const outboundBroadcastQueueArn = Fn.sub(
+  'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:outbound-broadcast-queue'
+);
 
-// Bedrock foundation model ARNs
-const bedrockNovaProArn = Fn.sub('arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-pro-v1:0');
-const bedrockNovaMicroArn = Fn.sub('arn:aws:bedrock:${AWS::Region}::foundation-model/amazon.nova-micro-v1:0');
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION A: AppSync Tool Functions (DynamoDB ClubRecord table)
+// ─────────────────────────────────────────────────────────────────────────────
 
-// ── 3.1 whatsapp-webhook: secretsmanager:GetSecretValue ─────────────────────
-// Requirement: 12.1, 12.3
-backend.whatsappWebhookFn.resources.lambda.addToRolePolicy(
+// ── A.1 vidaBailePayPackage: DynamoDB GetItem/PutItem/UpdateItem/Query ─────────
+backend.vidaBailePayPackage.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
-    actions: ['secretsmanager:GetSecretValue'],
-    resources: [whatsappSecretArn.toString()],
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Query',
+    ],
+    resources: [
+      CLUBRECORD_TABLE_ARN.toString(),
+      CLUBRECORD_GSI1_ARN.toString(),
+      CLUBRECORD_GSI2_ARN.toString(),
+    ],
   }),
 );
 
-(backend.whatsappWebhookFn.resources.lambda as LambdaFunction).addEnvironment(
-  'WHATSAPP_TOKEN_SECRET_ARN',
-  whatsappSecretArn.toString(),
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION B: WhatsApp Lambda Functions (ClubRecord table + SQS)
+// ─────────────────────────────────────────────────────────────────────────────
+// All handlers target the VidaBaile ClubRecord table.
+// TABLE_NAME injected as environment variable via clubRecordTable.tableName.
+// IAM grants ClubRecord table + gsi1pk-gsi1sk-index + gsi2pk-gsi2sk-index.
+// SQS event sources wired with CDK SqsEventSource.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── B.1 vidaBaileWhatsapp: DynamoDB (ClubRecord) + SQS SendMessage ─────────────
+backend.vidaBaileWhatsapp.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    effect: Effect.ALLOW,
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Query',
+      'dynamodb:PutItem',
+    ],
+    resources: [
+      CLUBRECORD_TABLE_ARN.toString(),
+      CLUBRECORD_GSI1_ARN.toString(),
+      CLUBRECORD_GSI2_ARN.toString(),
+    ],
+  }),
 );
 
-// ── 3.2 strands-agent: bedrock:InvokeModel + appsync:GraphQL ────────────────
-// No DynamoDB access — agent calls AppSync, not DynamoDB directly.
-// Requirements: 3.8, 12.1
-backend.strandsAgentFn.resources.lambda.addToRolePolicy(
+backend.vidaBaileWhatsapp.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    effect: Effect.ALLOW,
+    actions: ['sqs:SendMessage'],
+    resources: [inboundChatQueueArn.toString()],
+  }),
+);
+
+(backend.vidaBaileWhatsapp.resources.lambda as LambdaFunction).addEnvironment(
+  'TABLE_NAME',
+  clubRecordTable.tableName
+);
+(backend.vidaBaileWhatsapp.resources.lambda as LambdaFunction).addEnvironment(
+  'INBOUND_CHAT_QUEUE_URL',
+  Fn.sub('https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/inbound-chat-queue')
+);
+
+// ── B.2 vidaBaileChatAgent: DynamoDB (ClubRecord) + SQS Receive + Bedrock ──────
+backend.vidaBaileChatAgent.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    effect: Effect.ALLOW,
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Query',
+      'dynamodb:PutItem',
+    ],
+    resources: [
+      CLUBRECORD_TABLE_ARN.toString(),
+      CLUBRECORD_GSI1_ARN.toString(),
+      CLUBRECORD_GSI2_ARN.toString(),
+    ],
+  }),
+);
+
+backend.vidaBaileChatAgent.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    effect: Effect.ALLOW,
+    actions: ['sqs:ReceiveMessage', 'sqs:DeleteMessage'],
+    resources: [inboundChatQueueArn.toString()],
+  }),
+);
+
+backend.vidaBaileChatAgent.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
     actions: ['bedrock:InvokeModel'],
     resources: [
-      bedrockNovaProArn.toString(),
-      bedrockNovaMicroArn.toString(),
+      bedrockClaudeArn.toString(),      // Nova Pro — primary conversational reply
+      bedrockNovaMicroArn.toString(),   // Nova Micro — lightweight analysis call
     ],
   }),
 );
 
-backend.strandsAgentFn.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    effect: Effect.ALLOW,
-    actions: ['appsync:GraphQL'],
-    resources: [Fn.sub('${AppSyncArn}/*', { AppSyncArn: appSyncArn }).toString()],
-  }),
+(backend.vidaBaileChatAgent.resources.lambda as LambdaFunction).addEnvironment(
+  'TABLE_NAME',
+  clubRecordTable.tableName
 );
 
-// ── 3.3 book-coach: DynamoDB (GetItem/PutItem/UpdateItem/Query) + AppSync ───
-// Requirements: 3.8, 12.1, 12.2
-backend.bookCoachFn.resources.lambda.addToRolePolicy(
+// ── B.3 vidaBaileProcessOutboundQueue: DynamoDB (ClubRecord) + SQS Receive ─────
+backend.vidaBaileProcessOutboundQueue.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
     actions: [
-      'dynamodb:GetItem',
       'dynamodb:PutItem',
       'dynamodb:UpdateItem',
-      'dynamodb:Query',
+      'dynamodb:GetItem',
     ],
-    resources: [tableArn.toString(), gsi1Arn.toString()],
+    resources: [
+      CLUBRECORD_TABLE_ARN.toString(),
+      CLUBRECORD_GSI1_ARN.toString(),
+      CLUBRECORD_GSI2_ARN.toString(),
+    ],
   }),
 );
 
-backend.bookCoachFn.resources.lambda.addToRolePolicy(
+backend.vidaBaileProcessOutboundQueue.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
-    actions: ['appsync:GraphQL'],
-    resources: [Fn.sub('${AppSyncArn}/*', { AppSyncArn: appSyncArn }).toString()],
+    actions: ['sqs:ReceiveMessage', 'sqs:DeleteMessage'],
+    resources: [outboundBroadcastQueueArn.toString()],
   }),
 );
 
-// ── 3.4 pay-package: DynamoDB + AppSync + secretsmanager ────────────────────
-// Requirements: 3.8, 12.1, 12.3
-backend.payPackageFn.resources.lambda.addToRolePolicy(
+(backend.vidaBaileProcessOutboundQueue.resources.lambda as LambdaFunction).addEnvironment(
+  'TABLE_NAME',
+  clubRecordTable.tableName
+);
+
+// ── B.4 vidaBaileDispatchBroadcast: DynamoDB (ClubRecord) + SQS SendMessageBatch
+backend.vidaBaileDispatchBroadcast.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
     actions: [
-      'dynamodb:GetItem',
+      'dynamodb:Query',
       'dynamodb:PutItem',
-      'dynamodb:UpdateItem',
-      'dynamodb:Query',
+      'dynamodb:GetItem',
     ],
-    resources: [tableArn.toString(), gsi1Arn.toString()],
+    resources: [
+      CLUBRECORD_TABLE_ARN.toString(),
+      CLUBRECORD_GSI1_ARN.toString(),
+      CLUBRECORD_GSI2_ARN.toString(),
+    ],
   }),
 );
 
-backend.payPackageFn.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    effect: Effect.ALLOW,
-    actions: ['appsync:GraphQL'],
-    resources: [Fn.sub('${AppSyncArn}/*', { AppSyncArn: appSyncArn }).toString()],
-  }),
-);
-
-backend.payPackageFn.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    effect: Effect.ALLOW,
-    actions: ['secretsmanager:GetSecretValue'],
-    resources: [paymentSecretArn.toString()],
-  }),
-);
-
-(backend.payPackageFn.resources.lambda as LambdaFunction).addEnvironment(
-  'PAYMENT_SECRET_ARN',
-  paymentSecretArn.toString(),
-);
-
-// ── 3.5 postpone-session: DynamoDB (GetItem/UpdateItem/Query) + AppSync ─────
-// Requirements: 3.8, 12.1
-backend.postponeSessionFn.resources.lambda.addToRolePolicy(
+backend.vidaBaileDispatchBroadcast.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
     actions: [
-      'dynamodb:GetItem',
-      'dynamodb:UpdateItem',
-      'dynamodb:Query',
+      'sqs:SendMessage',
+      'sqs:SendMessageBatch',
     ],
-    resources: [tableArn.toString(), gsi1Arn.toString()],
+    resources: [outboundBroadcastQueueArn.toString()],
   }),
 );
 
-backend.postponeSessionFn.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    effect: Effect.ALLOW,
-    actions: ['appsync:GraphQL'],
-    resources: [Fn.sub('${AppSyncArn}/*', { AppSyncArn: appSyncArn }).toString()],
-  }),
+(backend.vidaBaileDispatchBroadcast.resources.lambda as LambdaFunction).addEnvironment(
+  'TABLE_NAME',
+  clubRecordTable.tableName
+);
+(backend.vidaBaileDispatchBroadcast.resources.lambda as LambdaFunction).addEnvironment(
+  'OUTBOUND_QUEUE_URL',
+  Fn.sub('https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/outbound-broadcast-queue')
 );
 
-// ── 3.6 query-membership: DynamoDB (GetItem/Query only) + AppSync ────────────
-// Read-only DynamoDB access — no PutItem or UpdateItem. Requirements: 3.8, 12.1
-backend.queryMembershipFn.resources.lambda.addToRolePolicy(
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION C: SQS Event Source Wiring
+// ─────────────────────────────────────────────────────────────────────────────
+// Wire existing SQS queues to their Lambda handlers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// ── C.1 inbound-chat-queue → vidaBaileChatAgent (batchSize=1) ─────────────────
+// Process one message at a time to preserve per-member Bedrock context.
+const inboundQueue = Queue.fromQueueArn(
+  backend.stack,
+  'InboundChatQueueRef',
+  inboundChatQueueArn.toString()
+);
+
+(backend.vidaBaileChatAgent.resources.lambda as LambdaFunction).addEventSource(
+  new SqsEventSource(inboundQueue, {
+    batchSize: 1,
+  })
+);
+
+// ── C.2 outbound-broadcast-queue → vidaBaileProcessOutboundQueue (batchSize=10)
+// Batch delivery for high-volume broadcast sends.
+const outboundQueue = Queue.fromQueueArn(
+  backend.stack,
+  'OutboundBroadcastQueueRef',
+  outboundBroadcastQueueArn.toString()
+);
+
+(backend.vidaBaileProcessOutboundQueue.resources.lambda as LambdaFunction).addEventSource(
+  new SqsEventSource(outboundQueue, {
+    batchSize: 10,
+  })
+);
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION D: Campaign Scheduler (EventBridge 1-minute CRON + Lambda IAM)
+// ─────────────────────────────────────────────────────────────────────────────
+// Polls every 1 minute for BROADCAST records with:
+//   status = SCHEDULED  and  launchDateTime <= now
+// For each match: atomically marks RUNNING, then async-invokes
+// vidaBaileDispatchBroadcast (InvocationType: Event) so enqueuing happens
+// independently.  Handler timeout is 55 s — well within the 1-minute window.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const schedulerFn = backend.vidaBaileCampaignScheduler.resources.lambda as LambdaFunction;
+const dispatchFn  = backend.vidaBaileDispatchBroadcast.resources.lambda as LambdaFunction;
+
+// ── D.1 DynamoDB: Query (GSI2 range) + UpdateItem (conditional RUNNING/COMPLETED)
+backend.vidaBaileCampaignScheduler.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
     actions: [
-      'dynamodb:GetItem',
       'dynamodb:Query',
+      'dynamodb:UpdateItem',
     ],
-    resources: [tableArn.toString(), gsi1Arn.toString()],
+    resources: [
+      CLUBRECORD_TABLE_ARN.toString(),
+      CLUBRECORD_GSI2_ARN.toString(), // gsi2pk=ALL#BROADCASTS, gsi2sk<=LAUNCH#<now>
+    ],
   }),
 );
 
-backend.queryMembershipFn.resources.lambda.addToRolePolicy(
+// ── D.2 Lambda: async invoke permission targeting dispatchBroadcast explicitly
+backend.vidaBaileCampaignScheduler.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
-    actions: ['appsync:GraphQL'],
-    resources: [Fn.sub('${AppSyncArn}/*', { AppSyncArn: appSyncArn }).toString()],
+    actions: ['lambda:InvokeFunction'],
+    resources: [dispatchFn.functionArn],
   }),
 );
 
-// ── 3.7 broadcast-marketing: Pinpoint SendMessages + secretsmanager ─────────
-// No DynamoDB access. Requirements: 3.8, 12.1, 12.3
-backend.broadcastMarketingFn.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    effect: Effect.ALLOW,
-    actions: ['mobiletargeting:SendMessages'],
-    resources: [pinpointAppArn.toString()],
-  }),
-);
+// ── D.3 Environment variables injected at deploy time
+schedulerFn.addEnvironment('TABLE_NAME',            clubRecordTable.tableName);
+schedulerFn.addEnvironment('DISPATCH_FUNCTION_ARN', dispatchFn.functionArn);
 
-backend.broadcastMarketingFn.resources.lambda.addToRolePolicy(
-  new PolicyStatement({
-    effect: Effect.ALLOW,
-    actions: ['secretsmanager:GetSecretValue'],
-    resources: [pinpointSecretArn.toString()],
-  }),
-);
-
-(backend.broadcastMarketingFn.resources.lambda as LambdaFunction).addEnvironment(
-  'PINPOINT_SECRET_ARN',
-  pinpointSecretArn.toString(),
-);
-
-
-// ── Tasks 6.1 / 6.2 / 6.3 — DynamoDB Single-Table Design (CDK escape hatch) ─
-//
-// IMPORTANT: Amplify Gen 2 creates one physical DynamoDB table per model by
-// default.  The overrides below align their configuration (billing, PITR, GSI1)
-// with the STD contract defined in the architectural spec.
-//
-// ⚠️  CURRENT LIMITATION: each model still maps to its OWN CloudFormation
-// AWS::DynamoDB::Table resource — they do NOT share a single physical table.
-// CloudFormation will reject a deployment where two resources in the SAME stack
-// try to create tables with the same physical name. A true single physical table
-// (one CloudFormation resource, all six entity PK/SK patterns co-located)
-// requires defining the table in `amplify/custom/` using a CDK construct and
-// wiring the six Lambda functions to that single resource ARN.
-// That refactoring is the intended next step.
-//
-// For now this block establishes the correct billing, PITR, and GSI1
-// configuration on every model-scoped table resource so that each one is
-// individually spec-compliant.
-//
-// Requirements: 11.2, 11.3, 11.4, 11.5
-
-const MODEL_NAMES = [
-  'Member',
-  'Coach',
-  'Schedule',
-  'Booking',
-  'MemberPackage',
-  'Claim',
-] as const;
-
-const { cfnTables } = backend.data.resources.cfnResources;
-
-// Guard: only apply overrides if cfnTables exists (not in test env)
-if (cfnTables) {
-  for (const modelName of MODEL_NAMES) {
-    const cfnTable = cfnTables[modelName];
-    if (!cfnTable) continue;
-
-    // ── 6.2 Billing mode + PITR ───────────────────────────────────────────────
-    // Requirements: 11.2, 11.4, 11.5
-    cfnTable.addPropertyOverride('BillingMode', 'PAY_PER_REQUEST');
-    cfnTable.addPropertyOverride('PointInTimeRecoverySpecification', {
-      PointInTimeRecoveryEnabled: true,
-    });
-
-    // ── 6.3 Attribute definitions for GSI1 keys ───────────────────────────────
-    // Amplify generates PK (HASH) and SK (RANGE) attribute definitions as type S.
-    // We append GSI1PK and GSI1SK here so the table recognises them as index keys.
-    // The full AttributeDefinitions array is set explicitly to avoid duplicates:
-    //   id   → Amplify's auto-generated partition key (type S)
-    //   PK, SK → overloaded STD keys (type S)
-    //   GSI1PK, GSI1SK → secondary-index keys (type S)
-    // Requirements: 11.2, 11.3
-    cfnTable.addPropertyOverride('AttributeDefinitions', [
-      { AttributeName: 'id', AttributeType: 'S' },
-      { AttributeName: 'GSI1PK', AttributeType: 'S' },
-      { AttributeName: 'GSI1SK', AttributeType: 'S' },
-    ]);
-
-    // ── 6.3 GSI1 global secondary index ──────────────────────────────────────
-    // Requirements: 11.2, 11.3
-    cfnTable.addPropertyOverride('GlobalSecondaryIndexes', [
-      {
-        IndexName: 'GSI1',
-        KeySchema: [
-          { AttributeName: 'GSI1PK', KeyType: 'HASH' },
-          { AttributeName: 'GSI1SK', KeyType: 'RANGE' },
-        ],
-        Projection: {
-          ProjectionType: 'ALL',
-        },
-      },
-    ]);
-  }
-}
+// ── D.4 EventBridge rule: rate(1 minute)
+new Rule(backend.stack, 'CampaignSchedulerRule', {
+  schedule: Schedule.expression('rate(1 minute)'),
+  targets:  [new EventsLambdaTarget(schedulerFn)],
+  description: 'Triggers vidaBaileCampaignScheduler every minute to fire due broadcast campaigns',
+});

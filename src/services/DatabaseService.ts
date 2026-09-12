@@ -42,6 +42,7 @@ import {
   type Claim,
 } from '../lib/models';
 
+
 /**
  * CRUD OPERATIONS: Type-Safe Mutations
  *
@@ -1267,34 +1268,29 @@ export async function createCatalogTemplate(
   packageId: string,
   catalogData: {
     name: string;
-    totalCredits: number;
     price: number;
-    validFrom: string;
-    validUntil: string;
-    status: 'ACTIVE' | 'INACTIVE' | 'DEPRECATED';
-    description?: string;
+    totalCredits: number;
+    packageKnowledgeBase?: string; // Base description — campaigns may override this
   }
 ): Promise<any> {
   console.log(`[DB Service] Creating Catalog Template: ${catalogData.name}`);
 
   const client = generateClient<Schema>();
 
+  const now = new Date().toISOString();
   const catalog = {
-    pk: adminSub,
-    sk: `CATALOG#${packageId}`,
-    entityType: 'CATALOG',
-    gsi1pk: `${adminSub}#CATALOG`,
-    gsi1sk: `STATUS#${catalogData.status}#EXPIRY#${catalogData.validUntil}`,
-    gsi2pk: `${adminSub}#CATALOG`,
-    gsi2sk: `LAUNCH#${catalogData.validFrom}`,
+    pk:                   adminSub,
+    sk:                   `CATALOG#${packageId}`,
+    entityType:           'CATALOG',
+    gsi1pk:               `${adminSub}#CATALOG`,
+    gsi1sk:               `NAME#${catalogData.name}`,
+    gsi2pk:               `${adminSub}#CATALOG`,
+    gsi2sk:               `CREATED#${now}`,
     packageId,
-    name: catalogData.name,
-    totalCredits: catalogData.totalCredits,
-    price: catalogData.price,
-    validFrom: catalogData.validFrom,
-    validUntil: catalogData.validUntil,
-    status: catalogData.status,
-    description: catalogData.description || '',
+    name:                 catalogData.name,
+    price:                catalogData.price,
+    totalCredits:         catalogData.totalCredits,
+    packageKnowledgeBase: catalogData.packageKnowledgeBase || '',
   };
 
   try {
@@ -1495,12 +1491,9 @@ export async function updateCatalogTemplate(
   packageId: string,
   updates: Partial<{
     name: string;
-    totalCredits: number;
     price: number;
-    validFrom: string;
-    validUntil: string;
-    status: 'ACTIVE' | 'INACTIVE' | 'DEPRECATED';
-    description?: string;
+    totalCredits: number;
+    packageKnowledgeBase?: string;
   }>
 ): Promise<any> {
   console.log(`[DB Service] Updating Catalog Template: ${packageId}`);
@@ -1518,19 +1511,25 @@ export async function updateCatalogTemplate(
       throw new Error(`Catalog not found: ${packageId}`);
     }
 
-    const updated = {
-      ...current.data,
-      name: updates.name ?? current.data.name,
-      totalCredits: updates.totalCredits ?? current.data.totalCredits,
-      price: updates.price ?? current.data.price,
-      validFrom: updates.validFrom ?? current.data.validFrom,
-      validUntil: updates.validUntil ?? current.data.validUntil,
-      status: updates.status ?? current.data.status,
-      description: updates.description ?? current.data.description,
-      gsi1sk: `STATUS#${updates.status ?? current.data.status}#EXPIRY#${updates.validUntil ?? current.data.validUntil}`,
+    // Build an explicit, sanitised payload — never spread current.data to avoid
+    // sending AppSync-managed fields (__typename, createdAt, updatedAt).
+    const resolvedName = updates.name ?? current.data.name;
+    const sanitized = {
+      pk:                   adminSub,
+      sk:                   `CATALOG#${packageId}`,
+      entityType:           'CATALOG',
+      gsi1pk:               `${adminSub}#CATALOG`,
+      gsi1sk:               `NAME#${resolvedName}`,
+      gsi2pk:               `${adminSub}#CATALOG`,
+      gsi2sk:               current.data.gsi2sk ?? `CREATED#${new Date().toISOString()}`,
+      packageId,
+      name:                 resolvedName,
+      price:                updates.price        ?? current.data.price,
+      totalCredits:         updates.totalCredits ?? current.data.totalCredits,
+      packageKnowledgeBase: updates.packageKnowledgeBase ?? current.data.packageKnowledgeBase ?? '',
     };
 
-    const { data: updatedRecord, errors } = await (client.models as any).ClubRecord.update(updated);
+    const { data: updatedRecord, errors } = await (client.models as any).ClubRecord.update(sanitized);
     
     if (errors) {
       console.error('[DB Service] Amplify Update Errors:', errors);
@@ -1786,6 +1785,215 @@ export async function queryBookingsBySchedule(
   }
 }
 
+
+// ============================================================================
+// CAMPAIGN OPERATIONS: Scheduled Broadcast Campaign Management
+// ============================================================================
+// Entity: BROADCAST (entityType = 'BROADCAST')
+//
+// STD Pattern:
+//   pk:     adminSub
+//   sk:     BROADCAST#<campaignId>
+//   gsi1pk: <adminSub>#BROADCASTS   (list all campaigns for admin)
+//   gsi1sk: STATUS#<broadcastStatus> (filter by SCHEDULED / RUNNING / COMPLETED)
+//   gsi2pk: ALL#BROADCASTS           (global scheduler query — all tenants)
+//   gsi2sk: LAUNCH#<ISO-datetime>    (range query: due campaigns)
+// ============================================================================
+
+export interface CampaignInput {
+  campaignId: string;
+  name: string;                    // Human-readable title
+  packageRef: string;              // CATALOG#<packageId>
+  launchDateTime: string;          // ISO 8601 UTC
+  validFrom?: string;              // Campaign validity start (YYYY-MM-DD)
+  validUntil?: string;             // Campaign validity end (YYYY-MM-DD)
+  campaignStatus?: string;         // DRAFT | SCHEDULED (default SCHEDULED)
+  targetingOptions: {
+    tier: string;
+    gender: string;
+    selectedPhones: string[];      // Explicit per-member selection from Target Members tab
+  };
+  broadcastType: string;           // e.g., promo_offer
+  promotionalContent: string;      // Pre-composed message body
+  campaignKnowledgeBase: string;   // AI context (auto-filled from package, editable)
+}
+
+/**
+ * Create a new BROADCAST campaign record with status=SCHEDULED.
+ * Does NOT trigger dispatch — the scheduler polls and fires at launchDateTime.
+ */
+export async function createCampaign(
+  adminSub: string,
+  input: CampaignInput
+): Promise<any> {
+  console.log(`[DB Service] Creating Campaign: ${input.name}`);
+
+  const client = generateClient<Schema>();
+
+  // ── Safe ISO conversion for AWSDateTime scalar ─────────────────────────────
+  // new Date('') returns Invalid Date; .toISOString() on that throws a RangeError.
+  // We omit launchDateTime entirely when absent/invalid rather than send null/''.
+  const parsedLaunch = input.launchDateTime ? new Date(input.launchDateTime) : null;
+  const launchIso = parsedLaunch && !isNaN(parsedLaunch.getTime())
+    ? parsedLaunch.toISOString()
+    : null;
+
+  const resolvedStatus = input.campaignStatus ?? 'SCHEDULED';
+
+  // ── Strict schema-mapped payload ───────────────────────────────────────────
+  // Only schema-defined fields are included. AppSync-managed fields
+  // (createdAt, updatedAt) are intentionally omitted — AppSync writes them.
+  // AWSDate requires YYYY-MM-DD — strip any time component and omit empty strings
+  const safeDate = (d: string | undefined | null): string | undefined => {
+    if (!d) return undefined;
+    const trimmed = d.split('T')[0]; // keep only date portion
+    return /^\d{4}-\d{2}-\d{2}$/.test(trimmed) ? trimmed : undefined;
+  };
+
+  const record: Record<string, unknown> = {
+    // Primary keys
+    pk:              adminSub,
+    sk:              `BROADCAST#${input.campaignId}`,
+    // Entity discriminator — must be exactly 'BROADCAST'
+    entityType:      'BROADCAST',
+    // GSI1: admin's campaign list, sorted by status
+    gsi1pk:          `${adminSub}#BROADCASTS`,
+    gsi1sk:          `STATUS#${resolvedStatus}`,
+    // GSI2: global scheduler partition, sorted by launch time for range queries
+    gsi2pk:          'ALL#BROADCASTS',
+    gsi2sk:          launchIso ? `LAUNCH#${launchIso}` : `LAUNCH#0000`,
+    // Campaign data — explicit field-by-field mapping
+    broadcastStatus:       resolvedStatus,
+    name:                  input.name.trim(),
+    packageRef:            input.packageRef,
+    broadcastType:         input.broadcastType,
+    promotionalContent:    input.promotionalContent,
+    // campaignKnowledgeBase: always included — chatAgent depends on this for KB injection
+    campaignKnowledgeBase: input.campaignKnowledgeBase ?? '',
+    // targetingOptions: JSON string (schema: a.string())
+    targetingOptions: JSON.stringify({
+      tier:           input.targetingOptions.tier,
+      gender:         input.targetingOptions.gender,
+      selectedPhones: input.targetingOptions.selectedPhones ?? [],
+    }),
+  };
+
+  // Conditionally include date/datetime fields — omit undefined to avoid
+  // AppSync scalar validation errors on AWSDate/AWSDateTime fields.
+  if (launchIso)                record.launchDateTime = launchIso;
+  if (safeDate(input.validFrom))  record.validFrom    = safeDate(input.validFrom);
+  if (safeDate(input.validUntil)) record.validUntil   = safeDate(input.validUntil);
+
+  console.log('[DB Service] Campaign payload:', {
+    sk: record.sk, status: record.broadcastStatus,
+    kbLength: (record.campaignKnowledgeBase as string).length,
+    hasValidFrom: !!record.validFrom, hasValidUntil: !!record.validUntil,
+    launchDateTime: record.launchDateTime,
+  });
+
+  try {
+    const { data: created, errors } = await (client.models as any).ClubRecord.create(record);
+
+    if (errors) {
+      console.error('[DB Service] Campaign Create Errors:', errors);
+      throw new Error(errors[0]?.message || 'Failed to create campaign');
+    }
+    console.log(`[DB Service] Campaign created: ${input.campaignId}`);
+    return created;
+  } catch (error) {
+    console.error('[DB Service] Failed to create campaign:', error);
+    throw error;
+  }
+}
+
+/**
+ * Query all campaigns for this admin (GSI1 Query — NO TABLE SCAN).
+ * Optional statusFilter: 'SCHEDULED' | 'RUNNING' | 'COMPLETED'
+ */
+export async function queryCampaigns(
+  adminSub: string,
+  statusFilter?: string
+): Promise<any[]> {
+  console.log(`[DB Service] Querying campaigns for: ${adminSub}`);
+
+  const client = generateClient<Schema>();
+
+  try {
+    const queryArgs: any = {
+      gsi1pk: `${adminSub}#BROADCASTS`,
+    };
+    if (statusFilter) {
+      queryArgs.gsi1sk = { beginsWith: `STATUS#${statusFilter}` };
+    }
+
+    const result = await (client.models as any).ClubRecord.listByGsi1(queryArgs);
+    const campaigns = (result.data ?? []).filter((r: any) => r.entityType === 'BROADCAST');
+    console.log(`[DB Service] Found ${campaigns.length} campaigns`);
+    return campaigns;
+  } catch (error) {
+    console.error('[DB Service] Failed to query campaigns:', error);
+    return [];
+  }
+}
+
+/**
+ * Subscribe to real-time campaign updates (GSI1 observeQuery).
+ */
+export function observeCampaigns(
+  adminSub: string,
+  callback: (data: any[]) => void
+): () => void {
+  const client = generateClient<Schema>();
+
+  const subscription = (client.models as any).ClubRecord.observeQuery({
+    filter: {
+      and: [
+        { gsi1pk:     { eq: `${adminSub}#BROADCASTS` } },
+        { entityType: { eq: 'BROADCAST' } },
+      ],
+    },
+  }).subscribe({
+    next: ({ items }: { items: any[] }) => {
+      console.log(`[DB Service] Campaigns received: ${items.length}`);
+      callback(items.filter((r: any) => r.entityType === 'BROADCAST'));
+    },
+    error: (err: Error) => console.error('[DB Service] Campaign subscription error:', err),
+  });
+
+  return () => subscription.unsubscribe();
+}
+
+/**
+ * Update campaign status (SCHEDULED → RUNNING → COMPLETED).
+ * Also updates gsi1sk so status-based queries stay consistent.
+ */
+export async function updateCampaignStatus(
+  adminSub: string,
+  campaignId: string,
+  newStatus: 'SCHEDULED' | 'RUNNING' | 'COMPLETED'
+): Promise<any> {
+  const client = generateClient<Schema>();
+
+  const now = new Date().toISOString();
+
+  try {
+    const { data: updated, errors } = await (client.models as any).ClubRecord.update({
+      pk:              adminSub,
+      sk:              `BROADCAST#${campaignId}`,
+      broadcastStatus: newStatus,
+      gsi1sk:          `STATUS#${newStatus}`,
+      updatedAt:       now,
+    });
+
+    if (errors) throw new Error(errors[0]?.message || 'Failed to update campaign status');
+    return updated;
+  } catch (error) {
+    console.error('[DB Service] Failed to update campaign status:', error);
+    throw error;
+  }
+}
+
+
 export default {
   // CRUD Operations
   createMemberRecord,
@@ -1838,6 +2046,12 @@ export default {
   // Package Enrollment Operations
   updatePackageStatusRecord,
   getPackageEnrollmentStats,
+
+  // Campaign Operations
+  createCampaign,
+  queryCampaigns,
+  observeCampaigns,
+  updateCampaignStatus,
 };
 
 /**

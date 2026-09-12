@@ -161,8 +161,7 @@ const schema = a.schema({
        *   records.filter(r => r.entityType === 'MEMBER')
        *   records.filter(r => r.entityType === 'COACH')
        */
-      entityType: a.enum(['MEMBER', 'COACH', 'SCHEDULE', 'BOOKING', 'PACKAGE', 'CLAIM', 'FACILITY', 'CATALOG']),
-
+      entityType: a.enum(['MEMBER', 'COACH', 'SCHEDULE', 'BOOKING', 'PACKAGE', 'CLAIM', 'FACILITY', 'CATALOG', 'BROADCAST', 'BROADCAST_RECEIPT']),
       // =========================================================================
       // SHARED OPTIONAL ATTRIBUTES
       // =========================================================================
@@ -203,6 +202,33 @@ const schema = a.schema({
       price: a.float(),               // 99.99
       validFrom: a.date(),            // 2024-09-01
       validUntil: a.date(),           // 2024-12-01
+      whatsappMessageId: a.string(),
+      
+      // WHATSAPP & BROADCAST TRACKING
+      isRead: a.boolean(),                    // true when Meta sends 'read' status receipt
+      hasReplied: a.boolean(),                // true when member sends any reply
+      chatAnalysis: a.json(),                 // { sentiment: 'positive|neutral|negative', summary: '...' }
+      deliveryStatus: a.string(),
+      lastInteractionAt: a.datetime(),
+
+      // BROADCAST CAMPAIGN fields (entityType = BROADCAST)
+      // sk pattern: BROADCAST#<campaignId>
+      // gsi1pk: <adminSub>#BROADCASTS
+      // gsi1sk: STATUS#<SCHEDULED|RUNNING|COMPLETED>
+      // gsi2pk: <adminSub>#BROADCASTS
+      // gsi2sk: LAUNCH#<ISO-datetime>  (used by scheduler to find due campaigns)
+      broadcastStatus: a.string(),      // SCHEDULED | RUNNING | COMPLETED
+      launchDateTime: a.datetime(),     // ISO 8601 UTC — when scheduler fires
+      packageRef: a.string(),           // Reference to CATALOG#<packageId>
+      campaignKnowledgeBase: a.string(), // AI context for this specific campaign
+      targetingOptions: a.string(),     // JSON: { tier, gender, selectedPhones[] }
+      broadcastType: a.string(),        // e.g., promo_offer, class_update
+      promotionalContent: a.string(),   // Pre-composed message body
+      targetMemberCount: a.integer(),   // Members queued
+      sentCount: a.integer(),           // Actual sends (updated by scheduler)
+
+      // PACKAGE KNOWLEDGE BASE (kept for non-campaign member-initiated queries)
+      packageKnowledgeBase: a.string(),
 
       // CLAIM-specific (tracks session usage)
 
