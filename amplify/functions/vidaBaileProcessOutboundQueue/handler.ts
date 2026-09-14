@@ -6,14 +6,14 @@
  * BROADCAST_RECEIPT record in DynamoDB for delivery tracking.
  *
  * SQS payload contract (written by vidaBaileDispatchBroadcast):
- *   adminSub         — required: BROADCAST_RECEIPT pk
- *   broadcastId      — required: BROADCAST_RECEIPT sk prefix
- *   campaignId       — same value as broadcastId; embedded in button payload for chatAgent
- *   recipientPhone   — required: message destination + sk suffix
- *   recipientName    — display name
- *   templateName     — "promo_offer" | plain text fallback
+ *   adminSub           — required: BROADCAST_RECEIPT pk
+ *   broadcastId        — required: BROADCAST_RECEIPT sk prefix
+ *   campaignId         — same value as broadcastId; embedded in button payload for chatAgent
+ *   recipientPhone     — required: message destination + sk suffix (E.164 with +)
+ *   recipientName      — display name
+ *   templateName       — "promo_offer" | plain text fallback
  *   promotionalContent — message body
- *   packageIntent    — package ID for button payload routing
+ *   packageIntent      — package ID for button payload routing
  *
  * BROADCAST_RECEIPT key pattern:
  *   pk:     adminSub
@@ -26,9 +26,9 @@ import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
 
 const ddb = new DynamoDBClient({});
 
-const TABLE_NAME          = process.env.TABLE_NAME!;
-const META_ACCESS_TOKEN   = process.env.WHATSAPP_ACCESS_TOKEN!;
-const PHONE_NUMBER_ID     = process.env.WHATSAPP_PHONE_ID!;
+const TABLE_NAME        = process.env.TABLE_NAME!;
+const META_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN!;
+const PHONE_NUMBER_ID   = process.env.WHATSAPP_PHONE_ID!;
 
 export const handler = async (event: any) => {
   console.log("📨 Processing outbound broadcast queue");
@@ -40,14 +40,14 @@ export const handler = async (event: any) => {
       // ── 1. Parse SQS body ───────────────────────────────────────────────
       const messageBody = JSON.parse(record.body);
 
-      const adminSub:          string | undefined = messageBody.adminSub;
-      const broadcastId:       string | undefined = messageBody.broadcastId;
-      const campaignId:        string | undefined = messageBody.campaignId ?? broadcastId;
-      const recipientPhone:    string | undefined = messageBody.recipientPhone;
-      const recipientName:     string             = messageBody.recipientName  ?? "Dancer";
-      const templateName:      string             = messageBody.templateName   ?? "promo_offer";
-      const promotionalContent: string            = messageBody.promotionalContent ?? "";
-      const packageIntent:     string             = messageBody.packageIntent  ?? "";
+      const adminSub:           string | undefined = messageBody.adminSub;
+      const broadcastId:        string | undefined = messageBody.broadcastId;
+      const campaignId:         string             = messageBody.campaignId ?? broadcastId ?? "";
+      const recipientPhone:     string | undefined = messageBody.recipientPhone;
+      const recipientName:      string             = messageBody.recipientName      ?? "Dancer";
+      const templateName:       string             = messageBody.templateName       ?? "promo_offer";
+      const promotionalContent: string             = messageBody.promotionalContent ?? "";
+      const packageIntent:      string             = messageBody.packageIntent      ?? "";
 
       // ── 2. Pre-flight validation — fail fast before any external call ───
       if (!adminSub || !broadcastId || !recipientPhone) {
@@ -60,13 +60,16 @@ export const handler = async (event: any) => {
       }
 
       // ── 3. Build WhatsApp payload ────────────────────────────────────────
+      // Meta requires the phone number without the leading '+'.
+      const targetNumber = recipientPhone.replace(/^\+/, "");
+
       let metaPayload: object;
 
       if (templateName === "promo_offer") {
         metaPayload = {
           messaging_product: "whatsapp",
           recipient_type:    "individual",
-          to:                recipientPhone,
+          to:                targetNumber,
           type:              "template",
           template: {
             name:     "promo_offer",
@@ -86,7 +89,7 @@ export const handler = async (event: any) => {
                 parameters: [
                   {
                     type: "payload",
-                    // Format: BUY_PACKAGE_<pkgId>_CAMP#<campaignId>_ADMIN#<adminSub>
+                    // Format: BUY_PACKAGE_<packageId>_CAMP#<campaignId>_ADMIN#<adminSub>
                     // chatAgent parses campaignId to fetch campaignKnowledgeBase
                     payload: `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`,
                   },
@@ -99,7 +102,7 @@ export const handler = async (event: any) => {
         metaPayload = {
           messaging_product: "whatsapp",
           recipient_type:    "individual",
-          to:                recipientPhone,
+          to:                targetNumber,
           type:              "text",
           text: { body: promotionalContent || "Hello from VidaBaile!" },
         };
@@ -109,7 +112,7 @@ export const handler = async (event: any) => {
       const response = await fetch(
         `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
         {
-          method: "POST",
+          method:  "POST",
           headers: {
             Authorization:  `Bearer ${META_ACCESS_TOKEN}`,
             "Content-Type": "application/json",
@@ -120,7 +123,9 @@ export const handler = async (event: any) => {
 
       const metaData: any = await response.json();
       if (!response.ok) {
-        throw new Error(`Meta API error (${response.status}): ${metaData.error?.message ?? JSON.stringify(metaData)}`);
+        throw new Error(
+          `Meta API error (${response.status}): ${metaData.error?.message ?? JSON.stringify(metaData)}`
+        );
       }
 
       const wamid: string | undefined = metaData.messages?.[0]?.id;
@@ -130,7 +135,7 @@ export const handler = async (event: any) => {
       console.log(`✅ Sent to ${recipientPhone} (WAMID: ${wamid})`);
 
       // ── 5. Create BROADCAST_RECEIPT ledger record ────────────────────────
-      // pk/sk validated above — safe to construct
+      // recipientPhone stored with '+' so webhook reverse-lookup matches exactly.
       const receiptPk = adminSub;
       const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
       const now       = new Date().toISOString();
@@ -139,21 +144,18 @@ export const handler = async (event: any) => {
         new PutItemCommand({
           TableName: TABLE_NAME,
           Item: {
-            pk:              { S: receiptPk },
-            sk:              { S: receiptSk },
-            entityType:      { S: "BROADCAST_RECEIPT" },
-            // GSI1: webhook routing — webhook queries gsi1pk=MSG#<wamid> to find this record
-            gsi1pk:          { S: `MSG#${wamid}` },
-            gsi1sk:          { S: "WEBHOOK" },
-            deliveryStatus:  { S: "SENT" },
-            hasReplied:      { BOOL: false },
+            pk:                { S: receiptPk },
+            sk:                { S: receiptSk },
+            entityType:        { S: "BROADCAST_RECEIPT" },
+            gsi1pk:            { S: `MSG#${wamid}` },
+            gsi1sk:            { S: "WEBHOOK" },
+            deliveryStatus:    { S: "SENT" },
+            hasReplied:        { BOOL: false },
             whatsappMessageId: { S: wamid },
-            recipientPhone:  { S: recipientPhone },
-            recipientName:   { S: recipientName },
-            broadcastId:     { S: broadcastId },
-            // updatedAt intentionally omitted — AppSync manages it for AppSync writes;
-            // for direct DDB writes we track createdAt only
-            createdAt:       { S: now },
+            recipientPhone:    { S: recipientPhone },
+            recipientName:     { S: recipientName },
+            broadcastId:       { S: broadcastId },
+            createdAt:         { S: now },
           },
         })
       );

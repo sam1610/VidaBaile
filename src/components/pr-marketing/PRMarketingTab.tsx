@@ -535,37 +535,74 @@ export const PRMarketingTab = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
 
+  // Map raw DynamoDB records to the Campaign type.
+  // Handles both new records (created via UI, have gsi1pk) and legacy records
+  // (written directly by dispatch Lambda, may lack name/broadcastStatus/gsi keys).
+  const mapCampaigns = (data: any[]): Campaign[] => {
+    const mapped: Campaign[] = data.map(r => {
+      const campaignId = r.sk?.replace('BROADCAST#', '') ?? '';
+      // Derive a human-readable name from whatever fields are available
+      const displayName =
+        r.name ||
+        r.promotionalContent?.substring(0, 40) ||
+        `Campaign ${campaignId.substring(0, 8)}`;
+      // Legacy dispatch records have no broadcastStatus — treat as COMPLETED
+      // since they were already dispatched.
+      const status = r.broadcastStatus ||
+        (r.targetMemberCount ? 'COMPLETED' : 'DRAFT');
+      return {
+        pk: r.pk, sk: r.sk,
+        campaignId,
+        name:                  displayName,
+        broadcastStatus:       status,
+        launchDateTime:        r.launchDateTime,
+        validFrom:             r.validFrom,
+        validUntil:            r.validUntil,
+        packageRef:            r.packageRef || r.packageIntent,  // legacy used packageIntent
+        promotionalContent:    r.promotionalContent,
+        campaignKnowledgeBase: r.campaignKnowledgeBase,
+        targetingOptions:      r.targetingOptions,
+        targetMemberCount:     r.targetMemberCount,
+        createdAt:             r.createdAt,
+      };
+    });
+    return mapped.sort((a, b) =>
+      new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
+    );
+  };
+
   useEffect(() => {
     if (!adminSub) return;
+
+    // ── Step 1: Immediate fetch on mount so data is available instantly ──
+    // observeQuery starts with an empty local cache each time the component
+    // mounts — doing a direct query first prevents the empty-list flash when
+    // navigating back to this tab.
     setLoading(true);
-    const unsub = DatabaseService.observeCampaigns(adminSub, (data: any[]) => {
-      const mapped: Campaign[] = data.map(r => ({
-        pk: r.pk, sk: r.sk,
-        campaignId:           r.sk?.replace('BROADCAST#', '') ?? '',
-        name:                 r.name ?? r.sk,
-        broadcastStatus:      r.broadcastStatus ?? 'DRAFT',
-        launchDateTime:       r.launchDateTime,
-        validFrom:            r.validFrom,
-        validUntil:           r.validUntil,
-        packageRef:           r.packageRef,
-        promotionalContent:   r.promotionalContent,
-        campaignKnowledgeBase: r.campaignKnowledgeBase,
-        targetingOptions:     r.targetingOptions,
-        targetMemberCount:    r.targetMemberCount,
-        createdAt:            r.createdAt,
-      }));
-      mapped.sort((a, b) =>
-        new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
-      );
-      setCampaigns(mapped);
+    DatabaseService.queryCampaigns(adminSub).then(data => {
+      setCampaigns(mapCampaigns(data));
+      setLoading(false);
+    }).catch(err => {
+      console.error('[PRMarketing] Initial campaign fetch failed:', err);
       setLoading(false);
     });
+
+    // ── Step 2: Live subscription for real-time updates (new saves, status changes)
+    const unsub = DatabaseService.observeCampaigns(adminSub, (data: any[]) => {
+      // Only update if subscription returns results to avoid overwriting the
+      // initial fetch with an empty array on reconnect.
+      if (data.length > 0) {
+        setCampaigns(mapCampaigns(data));
+      }
+    });
+
     return () => unsub();
   }, [adminSub]);
 
   useEffect(() => {
     if (!adminSub) return;
-    DatabaseService.queryActiveCatalogsRecord(adminSub).then(rows => {
+    // Fetch all catalogs (not just ACTIVE) so any referenced package can be resolved
+    DatabaseService.queryAllCatalogsRecord(adminSub).then(rows => {
       setCatalogs(rows
         .filter((r: any) => r.entityType === 'CATALOG')
         .map((r: any) => ({
@@ -734,19 +771,29 @@ export const PRMarketingTab = () => {
               <div style={{ fontSize:'11px', fontWeight:700, color:'#2e3b50',
                             textTransform:'uppercase' }}>{selected.name}</div>
               <StatusBadge status={selected.broadcastStatus} />
-              {[
-                ['📅 Launch',      fmtDate(selected.launchDateTime)],
-                ['📅 Valid From',  fmtDateShort(selected.validFrom)],
-                ['📅 Valid Until', fmtDateShort(selected.validUntil)],
-                ['📦 Package',     selected.packageRef?.replace('CATALOG#', 'PKG-') ?? '—'],
-                ['🎯 Targeting',   fmtTargeting(selected.targetingOptions)],
-                ['👥 Targeted',    selected.targetMemberCount?.toString() ?? '—'],
-              ].map(([label, value]) => (
-                <div key={label as string}>
-                  <div style={{ fontSize:'10px', color:'#666', marginBottom:'2px' }}>{label}</div>
-                  <div style={{ fontSize:'13px', fontWeight:700, color:'#2e3b50' }}>{value}</div>
-                </div>
-              ))}
+              {(() => {
+                // Resolve package name from the catalogs already loaded in state.
+                // packageRef may be "CATALOG#<id>" or bare "<id>"; packageIntent is
+                // the legacy field name used by the dispatch Lambda.
+                const rawRef = selected.packageRef ?? '';
+                const pkgId  = rawRef.replace('CATALOG#', '');
+                const pkgName = catalogs.find(c => c.packageId === pkgId)?.name ?? rawRef;
+
+                const rows: [string, string][] = [
+                  ['📅 Launch',     selected.launchDateTime ? fmtDate(selected.launchDateTime) : '—'],
+                  ['📅 Valid From',  selected.validFrom  ? fmtDateShort(selected.validFrom)  : '—'],
+                  ['📅 Valid Until', selected.validUntil ? fmtDateShort(selected.validUntil) : '—'],
+                  ['📦 Package',     pkgName || '—'],
+                  ['🎯 Targeting',   fmtTargeting(selected.targetingOptions)],
+                  ['👥 Targeted',    selected.targetMemberCount?.toString() ?? '—'],
+                ];
+                return rows.map(([label, value]) => (
+                  <div key={label}>
+                    <div style={{ fontSize:'10px', color:'#666', marginBottom:'2px' }}>{label}</div>
+                    <div style={{ fontSize:'13px', fontWeight:700, color:'#2e3b50' }}>{value}</div>
+                  </div>
+                ));
+              })()}
               {selected.campaignKnowledgeBase && (
                 <div>
                   <div style={{ fontSize:'10px', color:'#666', marginBottom:'4px' }}>🤖 AI Context</div>

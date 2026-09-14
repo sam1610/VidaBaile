@@ -17,6 +17,7 @@ import {
   DynamoDBClient,
   GetItemCommand,
   UpdateItemCommand,
+  QueryCommand
 } from "@aws-sdk/client-dynamodb";
 import {
   BedrockRuntimeClient,
@@ -43,11 +44,11 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 // ────────────────────────────────────────────────────────────────────────────
 const SYSTEM_PROMPT =
   "You are the official customer service assistant for VidaBaile Dance Club.\n" +
-  "RULE 1: You must detect the language of the user's message and REPLY IN THAT EXACT " +
-  "LANGUAGE (e.g., if the user writes in French, you MUST reply in French).\n" +
-  "RULE 2: Answer their questions using ONLY the context provided below. " +
-  "Do not invent details.\n" +
-  "[PACKAGE CONTEXT]: {KNOWLEDGE_BASE_TEXT}";
+  "RULE 1: ALWAYS reply in the exact same language as the user's message.\n" +
+  "RULE 2: Answer strictly using ONLY the [PACKAGE CONTEXT] below. If the context does not contain the answer, politely state you do not have that information.\n" +
+  "RULE 3: BE EXTREMELY BRIEF. Write a maximum of 1 to 2 short sentences. Answer ONLY the specific question asked.\n" +
+  "RULE 4: CURRENT CONTEXT OVERRIDES HISTORY. The [PACKAGE CONTEXT] below is the absolute truth. If your chat history contains information about a different package or dance style, you MUST ignore the history and use ONLY the new context below.\n\n" +
+  "[PACKAGE CONTEXT]\n{KNOWLEDGE_BASE_TEXT}";
 
 // ────────────────────────────────────────────────────────────────────────────
 // Fetch member profile + rolling chat history (last 10 turns)
@@ -65,7 +66,6 @@ async function getMemberProfile(adminSub: string, phone: string) {
 
     // chatHistory: new key (string-encoded JSON array of conversation turns)
     // chatAnalysis: new key (string-encoded JSON analytics object { sentiment, summary })
-    // Fall back to chatAnalysis in case older records pre-date the rename.
     let chatHistory: any[] = [];
     const rawHistory = res.Item.chatHistory?.S ?? res.Item.chatAnalysis?.S;
     if (rawHistory) {
@@ -74,6 +74,20 @@ async function getMemberProfile(adminSub: string, phone: string) {
         if (Array.isArray(parsed)) chatHistory = parsed;
         // If parsed is an object (analytics format), ignore — not history
       } catch { /* ignore malformed JSON */ }
+    }
+
+    // ── Time-Based Session Expiration ────────────────────────────────────────
+    const lastInteractionAt = res.Item.lastInteractionAt?.S;
+    if (lastInteractionAt) {
+      const lastTime = new Date(lastInteractionAt).getTime();
+      const now = new Date().getTime();
+      const hoursSinceLastMessage = (now - lastTime) / (1000 * 60 * 60);
+
+      // If more than 12 hours have passed, flush the history for this session
+      if (hoursSinceLastMessage > 12) {
+        console.log(`🕒 Session expired (${hoursSinceLastMessage.toFixed(1)} hours ago). Starting fresh context.`);
+        chatHistory = []; 
+      }
     }
 
     return {
@@ -99,29 +113,117 @@ async function getMemberProfile(adminSub: string, phone: string) {
 // ────────────────────────────────────────────────────────────────────────────
 async function getKnowledgeBase(
   adminSub: string,
-  campaignId:    string | null | undefined,
-  packageIntent: string | null | undefined
+  campaignId: string | null | undefined,
+  packageIntent: string | null | undefined,
+  senderPhone: string
 ): Promise<string> {
+  console.log(`🔍 KB Lookup | campaignId: \({campaignId || "NULL"} | phone:\){senderPhone}`);
+
+ // 1. Autonomous Fallback: Recovers missing campaignId using normalized phone
+  if (!campaignId) {
+    try {
+      const recentRes = await ddb.send(
+        new QueryCommand({
+          TableName: TABLE_NAME,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          // FIX: Filter on the non-key attribute 'recipientPhone' instead of 'sk'
+          FilterExpression: "recipientPhone = :phone",
+          ExpressionAttributeValues: {
+            ":pk": { S: adminSub },
+            ":prefix": { S: "BROADCAST#" },
+            ":phone": { S: senderPhone } // Webhook already normalized this to E.164
+          }
+        })
+      );
+      
+      const items = recentRes.Items || [];
+      if (items.length > 0) {
+        // Sort descending by createdAt — most recent receipt first
+        items.sort((a, b) => (b.createdAt?.S || "").localeCompare(a.createdAt?.S || ""));
+
+        // Walk receipts from newest to oldest. For each, check that its parent
+        // BROADCAST record is not an old COMPLETED campaign dispatched before the
+        // current one. Accept the first receipt whose campaign is SCHEDULED, RUNNING,
+        // or has no status (legacy) — i.e. not a stale completed campaign.
+        for (const item of items) {
+          const skVal = item.sk?.S;
+          if (!skVal) continue;
+          const match = skVal.match(/^BROADCAST#([^#]+)#MEMBER#/);
+          if (!match?.[1]) continue;
+          const candidateId = match[1];
+
+          // Quick-check: fetch the parent BROADCAST record status
+          let parentStatus: string | undefined;
+          try {
+            const parentRes = await ddb.send(
+              new GetItemCommand({
+                TableName: TABLE_NAME,
+                Key: { pk: { S: adminSub }, sk: { S: `BROADCAST#${candidateId}` } },
+              })
+            );
+            parentStatus = parentRes.Item?.broadcastStatus?.S;
+          } catch { /* ignore — use candidate anyway */ }
+
+          // Skip only if the campaign has a known COMPLETED status AND there
+          // are newer campaigns. Accept COMPLETED if it's the only option.
+          if (parentStatus === "COMPLETED" && items.indexOf(item) < items.length - 1) {
+            console.log(`⏭️ Skipping COMPLETED campaign ${candidateId} in auto-recovery`);
+            continue;
+          }
+
+          campaignId = candidateId;
+          console.log(`🪄 Recovered campaignId: ${campaignId} (status=${parentStatus ?? "none"})`);
+          break;
+        }
+      } else {
+         console.log(`⚠️ Auto-recovery found 0 receipts for phone ${senderPhone}`);
+      }
+    } catch (err: any) {
+      console.warn(`⚠️ Auto-recovery failed: ${err.message}`);
+    }
+  }
+
+  // 2. Fetch the KB using the campaignId
   if (campaignId) {
     try {
-      const res = await ddb.send(
+      const broadcastRes = await ddb.send(
         new GetItemCommand({
           TableName: TABLE_NAME,
           Key: { pk: { S: adminSub }, sk: { S: `BROADCAST#${campaignId}` } },
         })
       );
-      const kb  = res.Item?.campaignKnowledgeBase?.S;
-      const pkg = res.Item?.packageRef?.S ?? "";
+
+      // Use KB regardless of campaign status — COMPLETED just means dispatched,
+      // not that the context is wrong. The member is still asking about this campaign.
+      const kb = broadcastRes.Item?.campaignKnowledgeBase?.S;
       if (kb) {
         console.log(`📚 Campaign KB loaded (${campaignId})`);
-        return `${kb}${pkg ? `\nRelated Package: ${pkg}` : ""}`;
+        return kb;
+      }
+
+      // 3. Deep-fetch the CATALOG KB via package pointer
+      const packageRef = broadcastRes.Item?.packageIntent?.S || broadcastRes.Item?.packageRef?.S;
+      if (packageRef) {
+        const catalogSk = packageRef.startsWith("CATALOG#") ? packageRef : `CATALOG#${packageRef}`;
+        const catalogRes = await ddb.send(
+          new GetItemCommand({
+            TableName: TABLE_NAME,
+            Key: { pk: { S: adminSub }, sk: { S: catalogSk } },
+          })
+        );
+        const catalogKb = catalogRes.Item?.packageKnowledgeBase?.S;
+        if (catalogKb) {
+          console.log(`📦 Catalog KB successfully loaded via ${catalogSk}`);
+          return catalogKb;
+        }
       }
     } catch (err: any) {
-      console.warn(`⚠️ Campaign KB fetch error: ${err.message}`);
+      console.warn(`⚠️ KB fetch error: ${err.message}`);
     }
   }
 
-  if (packageIntent) {
+  // 4. Standalone package query (button payload)
+  if (!campaignId && packageIntent) {
     try {
       const res = await ddb.send(
         new GetItemCommand({
@@ -131,7 +233,7 @@ async function getKnowledgeBase(
       );
       const kb = res.Item?.packageKnowledgeBase?.S;
       if (kb) {
-        console.log(`📦 Package KB loaded (${packageIntent})`);
+        console.log(`📦 Package KB loaded directly (${packageIntent})`);
         return kb;
       }
     } catch (err: any) {
@@ -139,10 +241,9 @@ async function getKnowledgeBase(
     }
   }
 
-  console.log("ℹ️ No KB found — model will use boundary rule");
+  console.log("ℹ️ No KB found — model will enforce boundary rule");
   return "No specific package or campaign context available for this conversation.";
 }
-
 // ────────────────────────────────────────────────────────────────────────────
 // Invoke a Nova model (Converse API format shared by Pro and Micro)
 // ────────────────────────────────────────────────────────────────────────────
@@ -209,7 +310,7 @@ export const handler = async (event: any) => {
   for (const record of event.Records) {
     try {
       const msg = JSON.parse(record.body);
-      const {
+      let {
         adminSub,
         senderPhone,
         messageText,
@@ -220,12 +321,73 @@ export const handler = async (event: any) => {
 
       const now = new Date().toISOString();
 
-      // ── 0. Guard: adminSub is required for all DynamoDB operations ──────
+      // ── 0. Guard: Resolve free-text replies using contextWamid ──────
+      if (!adminSub && contextWamid) {
+        console.log(`🔍 Free text detected. Resolving adminSub from context: ${contextWamid}`);
+        try {
+          const receiptRes = await ddb.send(
+            new QueryCommand({
+              TableName: TABLE_NAME,
+              IndexName: "clubRecordsByGsi1pkAndGsi1sk",
+              KeyConditionExpression: "gsi1pk = :gsi1pk",
+              ExpressionAttributeValues: { ":gsi1pk": { S: `MSG#${contextWamid}` } },
+              Limit: 1
+            })
+          );
+          
+          if (receiptRes.Items && receiptRes.Items.length > 0) {
+            adminSub = receiptRes.Items[0].pk?.S;
+            // Extract campaignId from sk format: BROADCAST##MEMBER#
+            const skMatch = receiptRes.Items[0].sk?.S?.match(/^BROADCAST#([^#]+)#MEMBER#/);
+            if (skMatch && skMatch[1]) {
+              campaignId = skMatch[1];
+            }
+            console.log(`✅ Dynamically resolved adminSub: \({adminSub}, campaignId:\){campaignId}`);
+          }
+        } catch (err: any) {
+          console.warn(`⚠️ Failed to resolve contextWamid: ${err.message}`);
+        }
+      }
+
+      // Hard stop if we still have no adminSub after attempting to resolve
       if (!adminSub) {
         throw new Error(
-          `Missing adminSub in SQS payload — cannot fetch member profile or knowledge base ` +
+          `Missing adminSub in SQS payload and failed to resolve — cannot fetch member profile ` +
           `(senderPhone=${senderPhone})`
         );
+      }
+
+      // ── RESET command — developer/support tool ────────────────────────
+      // Sending the word "RESET" (case-insensitive) clears the rolling chat
+      // history for this member, giving the AI a clean slate on the next turn.
+      if (messageText.trim().toUpperCase() === "RESET") {
+        console.log(`🔄 RESET command received from ${senderPhone}`);
+        await ddb.send(
+          new UpdateItemCommand({
+            TableName: TABLE_NAME,
+            Key: { pk: { S: adminSub }, sk: { S: `MEMBER#${senderPhone}` } },
+            UpdateExpression: "REMOVE chatHistory",
+          })
+        );
+        // Acknowledge to the member and skip the rest of the AI pipeline
+        await fetch(
+          `https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_ID}/messages`,
+          {
+            method:  "POST",
+            headers: {
+              Authorization:  `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              messaging_product: "whatsapp",
+              recipient_type:    "individual",
+              to:                senderPhone,
+              type:              "text",
+              text:              { body: "Context reset." },
+            }),
+          }
+        );
+        continue; // skip Bedrock invocation for this record
       }
 
       // ── 1. Fetch member profile ─────────────────────────────────────────
@@ -236,7 +398,7 @@ export const handler = async (event: any) => {
       }
 
       // ── 2. Fetch knowledge base ─────────────────────────────────────────
-      const kbText = await getKnowledgeBase(adminSub, campaignId, packageIntent);
+      const kbText = await getKnowledgeBase(adminSub, campaignId, packageIntent, senderPhone);
 
       // ── 3. Build system prompt — inject KB text only ─────────────────────
       // Member context is surfaced via conversation history, not system prompt,

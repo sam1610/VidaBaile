@@ -220,6 +220,7 @@ backend.vidaBaileDispatchBroadcast.resources.lambda.addToRolePolicy(
     actions: [
       'dynamodb:Query',
       'dynamodb:PutItem',
+      "dynamodb:UpdateItem",
       'dynamodb:GetItem',
     ],
     resources: [

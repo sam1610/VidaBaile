@@ -1907,8 +1907,11 @@ export async function createCampaign(
 }
 
 /**
- * Query all campaigns for this admin (GSI1 Query — NO TABLE SCAN).
- * Optional statusFilter: 'SCHEDULED' | 'RUNNING' | 'COMPLETED'
+ * Query all campaigns for this admin.
+ *
+ * Strategy: GSI1 first (new records that have gsi1pk set), then primary-key
+ * range fallback (legacy records written directly by the dispatch Lambda that
+ * never received GSI keys).  Results are de-duplicated by sk.
  */
 export async function queryCampaigns(
   adminSub: string,
@@ -1917,23 +1920,55 @@ export async function queryCampaigns(
   console.log(`[DB Service] Querying campaigns for: ${adminSub}`);
 
   const client = generateClient<Schema>();
+  const seen = new Set<string>();
+  const merge = (items: any[]) =>
+    items.filter((r: any) => {
+      if (r.entityType !== 'BROADCAST') return false;
+      if (seen.has(r.sk)) return false;
+      seen.add(r.sk);
+      return true;
+    });
 
+  let campaigns: any[] = [];
+
+  // ── Path 1: GSI1 query (new records with gsi1pk = adminSub#BROADCASTS) ──
   try {
-    const queryArgs: any = {
-      gsi1pk: `${adminSub}#BROADCASTS`,
-    };
-    if (statusFilter) {
-      queryArgs.gsi1sk = { beginsWith: `STATUS#${statusFilter}` };
-    }
-
-    const result = await (client.models as any).ClubRecord.listByGsi1(queryArgs);
-    const campaigns = (result.data ?? []).filter((r: any) => r.entityType === 'BROADCAST');
-    console.log(`[DB Service] Found ${campaigns.length} campaigns`);
-    return campaigns;
-  } catch (error) {
-    console.error('[DB Service] Failed to query campaigns:', error);
-    return [];
+    const queryArgs: any = { gsi1pk: `${adminSub}#BROADCASTS` };
+    if (statusFilter) queryArgs.gsi1sk = { beginsWith: `STATUS#${statusFilter}` };
+    const gsi1Result = await (client.models as any).ClubRecord.listByGsi1(queryArgs);
+    campaigns.push(...merge(gsi1Result.data ?? []));
+    console.log(`[DB Service] GSI1 campaigns: ${campaigns.length}`);
+  } catch (err) {
+    console.warn('[DB Service] GSI1 campaign query failed:', err);
   }
+
+  // ── Path 2: Primary-key range query (legacy/direct-write records) ──────
+  // Catches records written by the dispatch Lambda (PutItemCommand) that
+  // never had gsi1pk/gsi1sk populated.
+  try {
+    const pkResult = await (client.models as any).ClubRecord.list({
+      filter: {
+        and: [
+          { pk:         { eq: adminSub } },
+          { sk:         { beginsWith: 'BROADCAST#' } },
+          { entityType: { eq: 'BROADCAST' } },
+        ],
+      },
+    });
+    const extras = merge(pkResult.data ?? []);
+    campaigns.push(...extras);
+    console.log(`[DB Service] PK-range extras: ${extras.length}, total: ${campaigns.length}`);
+  } catch (err) {
+    console.warn('[DB Service] PK-range campaign query failed:', err);
+  }
+
+  // Sort newest first
+  campaigns.sort((a, b) =>
+    new Date(b.createdAt ?? 0).getTime() - new Date(a.createdAt ?? 0).getTime()
+  );
+
+  console.log(`[DB Service] Total campaigns returned: ${campaigns.length}`);
+  return campaigns;
 }
 
 /**
@@ -1945,17 +1980,22 @@ export function observeCampaigns(
 ): () => void {
   const client = generateClient<Schema>();
 
+  // Subscribe on both the gsi1pk partition (new records) and on pk+sk prefix
+  // (legacy records that lack gsi1pk).  The broader pk filter catches everything.
   const subscription = (client.models as any).ClubRecord.observeQuery({
     filter: {
       and: [
-        { gsi1pk:     { eq: `${adminSub}#BROADCASTS` } },
+        { pk:         { eq: adminSub } },
         { entityType: { eq: 'BROADCAST' } },
       ],
     },
   }).subscribe({
     next: ({ items }: { items: any[] }) => {
-      console.log(`[DB Service] Campaigns received: ${items.length}`);
-      callback(items.filter((r: any) => r.entityType === 'BROADCAST'));
+      const broadcasts = items.filter(
+        (r: any) => r.entityType === 'BROADCAST' && r.sk?.startsWith('BROADCAST#')
+      );
+      console.log(`[DB Service] Campaigns subscription: ${broadcasts.length}`);
+      callback(broadcasts);
     },
     error: (err: Error) => console.error('[DB Service] Campaign subscription error:', err),
   });

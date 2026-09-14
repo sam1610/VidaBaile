@@ -1,7 +1,8 @@
 import {
   DynamoDBClient,
+  GetItemCommand,
   QueryCommand,
-  PutItemCommand,
+  UpdateItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import { SQSClient, SendMessageBatchCommand } from "@aws-sdk/client-sqs";
 
@@ -83,27 +84,37 @@ async function createBroadcastRecord(
   }
 ): Promise<void> {
   try {
-    const item: any = {
-      pk: { S: adminSub },
-      sk: { S: `BROADCAST#${broadcastId}` },
-      entityType: { S: "BROADCAST" },
-      templateName: { S: options.templateName },
-      broadcastType: { S: options.broadcastType },
-      promotionalContent: { S: options.promotionalContent },
-      targetTier: { S: options.targetingOptions?.tier ?? "ALL" },
-      targetStatus: { S: options.targetingOptions?.status ?? "ACTIVE" },
-      targetGender: { S: options.targetingOptions?.gender ?? "ALL" },
-      targetMemberCount: { N: String(options.targetMemberCount) },
-      createdAt: { S: new Date().toISOString() },
-      updatedAt: { S: new Date().toISOString() },
+    let updateExpr =
+      "SET entityType = :type, templateName = :tn, broadcastType = :bt, promotionalContent = :pc, targetTier = :tt, targetStatus = :ts, targetGender = :tg, targetMemberCount = :tmc, updatedAt = :now, broadcastStatus = :status, gsi1sk = :gsisk";
+
+    const exprVals: any = {
+      ":type": { S: "BROADCAST" },
+      ":tn": { S: options.templateName },
+      ":bt": { S: options.broadcastType },
+      ":pc": { S: options.promotionalContent },
+      ":tt": { S: options.targetingOptions?.tier ?? "ALL" },
+      ":ts": { S: options.targetingOptions?.status ?? "ACTIVE" },
+      ":tg": { S: options.targetingOptions?.gender ?? "ALL" },
+      ":tmc": { N: String(options.targetMemberCount) },
+      ":now": { S: new Date().toISOString() },
+      ":status": { S: "COMPLETED" },
+      ":gsisk": { S: "STATUS#COMPLETED" },
     };
 
     if (options.packageIntent) {
-      item.packageIntent = { S: options.packageIntent };
+      updateExpr += ", packageIntent = :pi";
+      exprVals[":pi"] = { S: options.packageIntent };
     }
 
-    await ddb.send(new PutItemCommand({ TableName: TABLE_NAME, Item: item }));
-    console.log(`📊 Created BROADCAST record: ${adminSub}#BROADCAST#${broadcastId}`);
+    await ddb.send(
+      new UpdateItemCommand({
+        TableName: TABLE_NAME,
+        Key: { pk: { S: adminSub }, sk: { S: `BROADCAST#${broadcastId}` } },
+        UpdateExpression: updateExpr,
+        ExpressionAttributeValues: exprVals,
+      })
+    );
+    console.log(`📊 Updated BROADCAST record: \({adminSub}#BROADCAST#\){broadcastId}`);
   } catch (err: any) {
     console.error(`❌ Failed to create BROADCAST record: ${err.message}`);
     throw err;
@@ -146,6 +157,38 @@ export const handler = async (event: any) => {
 
     console.log(`🔑 broadcastId: ${broadcastId}`);
 
+    // ── Guard: only dispatch SCHEDULED campaigns ──────────────────────────
+    // Re-fetch the BROADCAST record and check its current broadcastStatus.
+    // This prevents re-dispatching COMPLETED or RUNNING campaigns if the
+    // scheduler fires a second time before the status update propagates,
+    // or if the record was manually re-triggered.
+    try {
+      const existing = await ddb.send(
+        new GetItemCommand({
+          TableName: TABLE_NAME,
+          Key: {
+            pk: { S: adminSub },
+            sk: { S: `BROADCAST#${broadcastId}` },
+          },
+        })
+      );
+      
+      const currentStatus = existing.Item?.broadcastStatus?.S;
+      const currentGsi1sk = existing.Item?.gsi1sk?.S;
+
+      // Trust the UI's scheduled tab index (gsi1sk) in case a cloned campaign retained an old COMPLETED status
+      const isScheduled = currentStatus === "SCHEDULED" || currentGsi1sk === "STATUS#SCHEDULED";
+
+      if (!isScheduled && currentStatus) {
+        console.warn(
+          `⚠️ Campaign \({broadcastId} has status="\){currentStatus}" and gsi1sk="${currentGsi1sk}" — skipping dispatch`
+        );
+        return { success: false, error: `Campaign already ${currentStatus}` };
+      }
+    } catch (checkErr: any) {
+      console.log(`ℹ️ No existing BROADCAST record found for ${broadcastId} — proceeding`);
+    }
+
     const targetMembers = await queryTargetMembers(adminSub, {
       tier: targetingOptions?.tier,
       status: targetingOptions?.status ?? "ACTIVE",
@@ -180,6 +223,7 @@ export const handler = async (event: any) => {
             broadcastId,                       // required: BROADCAST_RECEIPT sk prefix
             campaignId: broadcastId,           // chatAgent fetches BROADCAST#campaignId for KB
             recipientPhone: member.phone,
+            metaPhone: member.phone.replace('+', ''),
             recipientName: member.name,
             templateName,
             promotionalContent,
