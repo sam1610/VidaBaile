@@ -180,12 +180,17 @@ export const handler = async (event: any) => {
   }
 
   try {
-    const bodyStr = event.body || "{}";
+    let bodyStr = event.body || "{}";
+
+    // ── 1. DECODE BASE64 (AWS Lambda fix) ──────────────────────────────────
+    if (event.isBase64Encoded) {
+      bodyStr = Buffer.from(bodyStr, "base64").toString("utf8");
+    }
 
     // Validate Meta signature
-    const xHubSig = event.headers?.["x-hub-signature-256"];
+    const xHubSig = event.headers?.["x-hub-signature-256"] || event.headers?.["X-Hub-Signature-256"];
     if (!validateMetaSignature(bodyStr, xHubSig)) {
-      console.warn("❌ Invalid Meta webhook signature");
+      console.error(`❌ Signature mismatch! Header received: ${xHubSig || "NONE"}. (Check META_APP_SECRET)`);
       return { statusCode: 403, body: "Invalid signature" };
     }
 
