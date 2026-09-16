@@ -55,14 +55,40 @@ const SYSTEM_PROMPT =
 // Chat history stored as JSON array in the member DynamoDB record.
 // ────────────────────────────────────────────────────────────────────────────
 async function getMemberProfile(adminSub: string, phone: string) {
-  try {
-    const res = await ddb.send(
-      new GetItemCommand({
-        TableName: TABLE_NAME,
-        Key: { pk: { S: adminSub }, sk: { S: `MEMBER#${phone}` } },
-      })
-    );
-    if (!res.Item) return null;
+  const cleanPhone = phone.trim();
+const phoneWithPlus = cleanPhone.startsWith('+') ? cleanPhone : `+${cleanPhone}`;
+const phoneWithoutPlus = phoneWithPlus.replace('+', '');
+
+try {
+// Attempt 1: Look for MEMBER#+973...
+let res = await ddb.send(
+  new GetItemCommand({
+    TableName: TABLE_NAME,
+    Key: { pk: { S: adminSub }, sk: { S: `MEMBER#${phoneWithPlus}` } },
+  })
+);
+
+// Attempt 2: Look for MEMBER#973... (no plus) if Attempt 1 fails
+if (!res.Item) {
+  res = await ddb.send(
+    new GetItemCommand({
+      TableName: TABLE_NAME,
+      Key: { pk: { S: adminSub }, sk: { S: `MEMBER#${phoneWithoutPlus}` } },
+    })
+  );
+}
+
+// 2. FALLBACK PROFILE (Self-Healing Mechanism)
+if (!res.Item) {
+  console.warn(`⚠️ Member not found in DB for ${cleanPhone}. Generating fallback profile.`);
+  return {
+    name:           "Dancer",
+    tier:           "STANDARD",
+    status:         "ACTIVE",
+    activePackages: [],
+    chatHistory:    [],
+  };
+}
 
     // chatHistory: new key (string-encoded JSON array of conversation turns)
     // chatAnalysis: new key (string-encoded JSON analytics object { sentiment, summary })
@@ -391,11 +417,13 @@ export const handler = async (event: any) => {
       }
 
       // ── 1. Fetch member profile ─────────────────────────────────────────
-      const member = await getMemberProfile(adminSub, senderPhone);
-      if (!member) {
-        console.warn(`⚠️ Member not found: ${senderPhone}`);
-        continue;
-      }
+      const member = await getMemberProfile(adminSub, senderPhone) ?? {
+        name: "Member",
+        tier: "STANDARD",
+        status: "ACTIVE",
+        activePackages: [] as string[],
+        chatHistory: [] as any[],
+      };
 
       // ── 2. Fetch knowledge base ─────────────────────────────────────────
       const kbText = await getKnowledgeBase(adminSub, campaignId, packageIntent, senderPhone);
@@ -472,26 +500,29 @@ export const handler = async (event: any) => {
       const assistantTurn = { role: "assistant", content: [{ text: assistantReply }] };
       const updatedHistory = [...messages, assistantTurn].slice(-10);
 
-      let updateExpr = "SET chatHistory = :history, updatedAt = :now";
-      const exprVals: any = {
-        ":history": { S: JSON.stringify(updatedHistory) },
-        ":now":     { S: now },
-      };
+      let updateExpr = "SET chatHistory = :history, updatedAt = :now, entityType = :type, #nm = :name";
+const exprNames: any = { "#nm": "name" };
+const exprVals: any = {
+  ":history": { S: JSON.stringify(updatedHistory) },
+  ":now":     { S: now },
+  ":type":    { S: "MEMBER" },
+  ":name":    { S: member.name }
+};
 
-      // chatAnalysis stores the analysis JSON object (schema: a.json())
-      if (analysis) {
-        updateExpr += ", chatAnalysis = :analysis";
-        exprVals[":analysis"] = { S: JSON.stringify(analysis) };
-      }
+if (analysis) {
+  updateExpr += ", chatAnalysis = :analysis";
+  exprVals[":analysis"] = { S: JSON.stringify(analysis) };
+}
 
-      await ddb.send(
-        new UpdateItemCommand({
-          TableName:                 TABLE_NAME,
-          Key:                       { pk: { S: adminSub }, sk: { S: `MEMBER#${senderPhone}` } },
-          UpdateExpression:          updateExpr,
-          ExpressionAttributeValues: exprVals,
-        })
-      );
+await ddb.send(
+  new UpdateItemCommand({
+    TableName:                 TABLE_NAME,
+    Key:                       { pk: { S: adminSub }, sk: { S: `MEMBER#${senderPhone}` } },
+    UpdateExpression:          updateExpr,
+    ExpressionAttributeNames:  exprNames, // <-- ADD THIS LINE
+    ExpressionAttributeValues: exprVals,
+  })
+);
 
     } catch (err: any) {
       console.error(`❌ chatAgent error: ${err.message}`);
