@@ -1,4 +1,4 @@
-import { DynamoDBClient, QueryCommand, GetItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, QueryCommand, GetItemCommand, PutItemCommand } from "@aws-sdk/client-dynamodb";
 import * as crypto from "crypto";
 
 const ddb = new DynamoDBClient({});
@@ -161,7 +161,24 @@ export const handler = async (event: any) => {
       }
       // -- C. Final Submission --
       else if (payload.action === "FINALIZE_SUBMISSION") {
-        // Here you would run a DynamoDB PutItem to permanently save the booking
+        const bookingId = crypto.randomUUID();
+        const timestamp = new Date().toISOString();
+
+        await ddb.send(new PutItemCommand({
+          TableName: TABLE_NAME,
+          Item: {
+            pk: { S: adminSub }, 
+            sk: { S: `BOOKING#${bookingId}` },
+            gsi1pk: { S: `${adminSub}#BOOKINGS` }, 
+            gsi1sk: { S: `STATUS#CONFIRMED#${timestamp}` },
+            entityType: { S: "BOOKING" },
+            packageId: { S: payload.package_id || "UNKNOWN" },
+            bookingDate: { S: payload.date || "UNKNOWN" },
+            bookingTime: { S: payload.time || "UNKNOWN" },
+            createdAt: { S: timestamp }
+          }
+        }));
+
         responseScreen = "Terminal_Success";
         responseData = {};
       }
