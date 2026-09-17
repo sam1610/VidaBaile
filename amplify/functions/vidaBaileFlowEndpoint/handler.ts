@@ -1,10 +1,9 @@
-import { DynamoDBClient, QueryCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, QueryCommand, GetItemCommand } from "@aws-sdk/client-dynamodb";
 import * as crypto from "crypto";
 
 const ddb = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
-// In production, fetch this from AWS Systems Manager Parameter Store or AWS Secrets Manager
-const PRIVATE_KEY = process.env.FLOW_PRIVATE_KEY!; 
+// Removed the top-level PRIVATE_KEY declaration to prevent cold-start crashes
 
 // ────────────────────────────────────────────────────────────────────────────
 // 1. Meta Flows Cryptography Engine
@@ -12,7 +11,6 @@ const PRIVATE_KEY = process.env.FLOW_PRIVATE_KEY!;
 function decryptMetaRequest(body: any, privateKey: string) {
   const { encrypted_aes_key, encrypted_flow_data, initial_vector } = body;
 
-  // Decrypt AES key with RSA-OAEP-SHA256
   const aesKey = crypto.privateDecrypt(
     { key: privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
     Buffer.from(encrypted_aes_key, "base64")
@@ -22,7 +20,6 @@ function decryptMetaRequest(body: any, privateKey: string) {
   const flowBuffer = Buffer.from(encrypted_flow_data, "base64");
   const authTagOffset = flowBuffer.length - 16;
 
-  // Decrypt payload with AES-128-GCM
   const decipher = crypto.createDecipheriv("aes-128-gcm", aesKey, iv);
   decipher.setAuthTag(flowBuffer.subarray(authTagOffset));
   const payload = Buffer.concat([
@@ -34,7 +31,6 @@ function decryptMetaRequest(body: any, privateKey: string) {
 }
 
 function encryptMetaResponse(responseData: any, aesKey: Buffer, originalIv: Buffer) {
-  // Flip the IV (Bitwise NOT) required by Meta's spec
   const flippedIv = Buffer.alloc(16);
   for (let i = 0; i < 16; i++) flippedIv[i] = ~originalIv[i];
 
@@ -51,7 +47,6 @@ function encryptMetaResponse(responseData: any, aesKey: Buffer, originalIv: Buff
 // 2. Data Fetching Helpers
 // ────────────────────────────────────────────────────────────────────────────
 async function fetchActivePackages(adminSub: string) {
-  // Queries GSI1 for all active catalog packages
   const res = await ddb.send(new QueryCommand({
     TableName: TABLE_NAME,
     IndexName: "clubRecordsByGsi1pkAndGsi1sk",
@@ -69,6 +64,17 @@ async function fetchActivePackages(adminSub: string) {
   }));
 }
 
+async function fetchPackageById(adminSub: string, packageId: string) {
+  const res = await ddb.send(new GetItemCommand({
+    TableName: TABLE_NAME,
+    Key: {
+      pk: { S: adminSub },
+      sk: { S: `CATALOG#${packageId}` }
+    }
+  }));
+  return res.Item;
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // 3. Main Handler
 // ────────────────────────────────────────────────────────────────────────────
@@ -76,64 +82,99 @@ export const handler = async (event: any) => {
   console.log("🌊 Flow Endpoint Triggered");
 
   try {
-    const body = JSON.parse(event.body);
+    // Safely load and sanitize the key INSIDE the execution context
+    const rawKey = process.env.FLOW_PRIVATE_KEY || "";
+    const PRIVATE_KEY = rawKey.replace(/\\n/g, '\n');
+
+    if (!PRIVATE_KEY) {
+      console.error("❌ CRITICAL: FLOW_PRIVATE_KEY is missing from environment variables.");
+    }
+
+    let bodyStr = event.body || "{}";
+    if (event.isBase64Encoded) {
+      bodyStr = Buffer.from(bodyStr, "base64").toString("utf8");
+    }
+    const body = JSON.parse(bodyStr);
+
     const { aesKey, iv, data: decryptedData } = decryptMetaRequest(body, PRIVATE_KEY);
-    
     console.log("🔓 Decrypted payload action:", decryptedData.action);
 
-    let responseScreen = "Main_Menu_Screen";
-    let responseData: any = {};
+    // ── 1. HEALTH CHECK PING ──────────────────────────────────────────────
+    if (decryptedData.action === "ping") {
+      console.log("🏓 Ping received, returning active status.");
+      return {
+        statusCode: 200,
+        body: encryptMetaResponse({ data: { status: "active" } }, aesKey, iv)
+      };
+    }
 
-    // ── ROUTING STATE MACHINE ─────────────────────────────────────────────
-    
-    if (decryptedData.action === "INIT" || decryptedData.action === "ping") {
-      responseScreen = "Main_Menu_Screen";
+    let responseScreen = "";
+    let responseData: any = {};
+    const adminSub = "8438c488-7081-70fc-4e23-656f4cdd7fb6"; // Demo Admin Sub
+
+    // ── 2. ROUTING STATE MACHINE ──────────────────────────────────────────
+    if (decryptedData.action === "INIT") {
+      responseScreen = "Packages_Screen";
       responseData = {
-        greeting: "Welcome to La Vida Dance Club! How can we help you today?",
-        service_options: [
-          { id: "view_packages", title: "🎟️ Packages", description: "Browse and buy dance packages" },
-          { id: "book_coach", title: "🕺 Coach Reservation", description: "Book a private session" },
-          { id: "request_callback", title: "📞 Call Back", description: "Have us contact you" }
-        ]
+        packages_list: await fetchActivePackages(adminSub)
       };
     } 
     else if (decryptedData.action === "data_exchange") {
-      const payload = decryptedData.data; // Custom payload from your Flow JSON
+      const payload = decryptedData.data; 
       
-      if (payload.action === "ROUTE_FROM_MENU") {
-        if (payload.selection === "view_packages") {
-          responseScreen = "Packages_Screen";
-          // Hardcoded adminSub for demo. In production, pass this via the Flow message launch or resolve dynamically.
-          const adminSub = "8438c488-7081-70fc-4e23-656f4cdd7fb6"; 
+      // -- A. Package Selection --
+      if (payload.action === "FETCH_PACKAGE_DETAILS") {
+        const pkg = await fetchPackageById(adminSub, payload.package_id);
+        responseScreen = "Package_Details_Screen";
+        responseData = {
+          package_title: pkg?.packageType?.S || "Unknown Package",
+          package_description: `Price: ${pkg?.price?.N || "0"} BHD. Includes exclusive sessions.`,
+          package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop", // Add a real S3 URL here later
+          is_time_error_visible: false,
+          time_error_msg: ""
+        };
+      }
+      // -- B. Time/Date Validation --
+      else if (payload.action === "VALIDATE_BOOKING") {
+        const selectedDate = new Date(`${payload.date}T${payload.time}:00`);
+        const now = new Date();
+
+        // Validation Logic: Date cannot be in the past
+        if (selectedDate < now) {
+          responseScreen = "Package_Details_Screen";
           responseData = {
-            packages_list: await fetchActivePackages(adminSub)
+            // Re-populate the screen data so it doesn't crash
+            package_title: "Selected Package", 
+            package_description: "Please select a valid time.",
+            package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop",
+            // Trigger the red error text we added to the JSON
+            is_time_error_visible: true,
+            time_error_msg: "The selected time has already passed. Please choose a future slot."
+          };
+        } else {
+          // Validation passed! Move to confirmation screen.
+          responseScreen = "Validation_Screen";
+          responseData = {
+            summary_text: `You are requesting a booking for ${payload.date} at ${payload.time}.`
           };
         }
-        // Add else if for book_coach and request_callback here
       }
+      // -- C. Final Submission --
       else if (payload.action === "FINALIZE_SUBMISSION") {
-        // Write to DynamoDB logic goes here based on accumulated payload
+        // Here you would run a DynamoDB PutItem to permanently save the booking
         responseScreen = "Terminal_Success";
         responseData = {};
       }
     }
 
-    // ── ENCRYPT AND RETURN ────────────────────────────────────────────────
-    const flowResponse = {
-      screen: responseScreen,
-      data: responseData
-    };
-
-    const encryptedBody = encryptMetaResponse(flowResponse, aesKey, iv);
-
+    // ── 3. ENCRYPT AND RETURN UI PAYLOAD ──────────────────────────────────
     return {
       statusCode: 200,
-      body: encryptedBody
+      body: encryptMetaResponse({ screen: responseScreen, data: responseData }, aesKey, iv)
     };
 
   } catch (err: any) {
     console.error("❌ Flow execution error:", err);
-    // Meta expects standard HTTP errors if decryption fails
     return { statusCode: 500, body: "Internal Server Error" };
   }
 };

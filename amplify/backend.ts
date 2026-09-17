@@ -1,6 +1,6 @@
 import { defineBackend } from '@aws-amplify/backend';
 import { Effect, PolicyStatement } from 'aws-cdk-lib/aws-iam';
-import { Function as LambdaFunction } from 'aws-cdk-lib/aws-lambda';
+import { Function as LambdaFunction, FunctionUrlAuthType, HttpMethod } from 'aws-cdk-lib/aws-lambda';
 import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
@@ -14,6 +14,7 @@ import { vidaBaileChatAgent } from './functions/vidaBaileChatAgent/resource';
 import { vidaBaileProcessOutboundQueue } from './functions/vidaBaileProcessOutboundQueue/resource';
 import { vidaBaileDispatchBroadcast } from './functions/vidaBaileDispatchBroadcast/resource';
 import { vidaBaileCampaignScheduler } from './functions/vidaBaileCampaignScheduler/resource';
+import { vidaBaileFlowEndpoint } from './functions/vidaBaileFlowEndpoint/resource';
 
 export const backend = defineBackend({
   auth,
@@ -24,6 +25,7 @@ export const backend = defineBackend({
   vidaBaileProcessOutboundQueue,
   vidaBaileDispatchBroadcast,
   vidaBaileCampaignScheduler,
+  vidaBaileFlowEndpoint,
 });
 
 // ── Cognito password policy override ────────────────────────────────────────
@@ -99,11 +101,6 @@ backend.vidaBailePayPackage.resources.lambda.addToRolePolicy(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION B: WhatsApp Lambda Functions (ClubRecord table + SQS)
-// ─────────────────────────────────────────────────────────────────────────────
-// All handlers target the VidaBaile ClubRecord table.
-// TABLE_NAME injected as environment variable via clubRecordTable.tableName.
-// IAM grants ClubRecord table + gsi1pk-gsi1sk-index + gsi2pk-gsi2sk-index.
-// SQS event sources wired with CDK SqsEventSource.
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── B.1 vidaBaileWhatsapp: DynamoDB (ClubRecord) + SQS SendMessage ─────────────
@@ -254,11 +251,8 @@ backend.vidaBaileDispatchBroadcast.resources.lambda.addToRolePolicy(
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION C: SQS Event Source Wiring
 // ─────────────────────────────────────────────────────────────────────────────
-// Wire existing SQS queues to their Lambda handlers.
-// ─────────────────────────────────────────────────────────────────────────────
 
 // ── C.1 inbound-chat-queue → vidaBaileChatAgent (batchSize=1) ─────────────────
-// Process one message at a time to preserve per-member Bedrock context.
 const inboundQueue = Queue.fromQueueArn(
   backend.stack,
   'InboundChatQueueRef',
@@ -272,7 +266,6 @@ const inboundQueue = Queue.fromQueueArn(
 );
 
 // ── C.2 outbound-broadcast-queue → vidaBaileProcessOutboundQueue (batchSize=10)
-// Batch delivery for high-volume broadcast sends.
 const outboundQueue = Queue.fromQueueArn(
   backend.stack,
   'OutboundBroadcastQueueRef',
@@ -288,17 +281,10 @@ const outboundQueue = Queue.fromQueueArn(
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION D: Campaign Scheduler (EventBridge 1-minute CRON + Lambda IAM)
 // ─────────────────────────────────────────────────────────────────────────────
-// Polls every 1 minute for BROADCAST records with:
-//   status = SCHEDULED  and  launchDateTime <= now
-// For each match: atomically marks RUNNING, then async-invokes
-// vidaBaileDispatchBroadcast (InvocationType: Event) so enqueuing happens
-// independently.  Handler timeout is 55 s — well within the 1-minute window.
-// ─────────────────────────────────────────────────────────────────────────────
 
 const schedulerFn = backend.vidaBaileCampaignScheduler.resources.lambda as LambdaFunction;
 const dispatchFn  = backend.vidaBaileDispatchBroadcast.resources.lambda as LambdaFunction;
 
-// ── D.1 DynamoDB: Query (GSI2 range) + UpdateItem (conditional RUNNING/COMPLETED)
 backend.vidaBaileCampaignScheduler.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
@@ -308,12 +294,11 @@ backend.vidaBaileCampaignScheduler.resources.lambda.addToRolePolicy(
     ],
     resources: [
       CLUBRECORD_TABLE_ARN.toString(),
-      CLUBRECORD_GSI2_ARN.toString(), // gsi2pk=ALL#BROADCASTS, gsi2sk<=LAUNCH#<now>
+      CLUBRECORD_GSI2_ARN.toString(),
     ],
   }),
 );
 
-// ── D.2 Lambda: async invoke permission targeting dispatchBroadcast explicitly
 backend.vidaBaileCampaignScheduler.resources.lambda.addToRolePolicy(
   new PolicyStatement({
     effect: Effect.ALLOW,
@@ -322,13 +307,58 @@ backend.vidaBaileCampaignScheduler.resources.lambda.addToRolePolicy(
   }),
 );
 
-// ── D.3 Environment variables injected at deploy time
 schedulerFn.addEnvironment('TABLE_NAME',            clubRecordTable.tableName);
 schedulerFn.addEnvironment('DISPATCH_FUNCTION_ARN', dispatchFn.functionArn);
 
-// ── D.4 EventBridge rule: rate(1 minute)
 new Rule(backend.stack, 'CampaignSchedulerRule', {
   schedule: Schedule.expression('rate(1 minute)'),
   targets:  [new EventsLambdaTarget(schedulerFn)],
   description: 'Triggers vidaBaileCampaignScheduler every minute to fire due broadcast campaigns',
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION E: Meta WhatsApp Flow Endpoint (HTTPS Function URL)
+// ─────────────────────────────────────────────────────────────────────────────
+// Exposes the Flow Endpoint Lambda directly to the public internet so Meta
+// can send End-to-End Encrypted (E2EE) JSON payloads for UI interactions.
+// ─────────────────────────────────────────────────────────────────────────────
+
+const flowEndpointLambda = backend.vidaBaileFlowEndpoint.resources.lambda as LambdaFunction;
+
+// 1. Grant read/write access to DynamoDB (to fetch packages/coaches and upsert bookings)
+backend.vidaBaileFlowEndpoint.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    effect: Effect.ALLOW,
+    actions: [
+      'dynamodb:Query',
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+    ],
+    resources: [
+      CLUBRECORD_TABLE_ARN.toString(),
+      CLUBRECORD_GSI1_ARN.toString(),
+      CLUBRECORD_GSI2_ARN.toString(),
+    ],
+  }),
+);
+
+// 2. Inject the DynamoDB table name into the Lambda's environment variables
+flowEndpointLambda.addEnvironment('TABLE_NAME', clubRecordTable.tableName);
+
+// 3. Expose as a Public HTTPS URL (No IAM Auth required because Meta encrypts the payload)
+const flowUrl = flowEndpointLambda.addFunctionUrl({
+  authType: FunctionUrlAuthType.NONE,
+  cors: {
+    allowedOrigins: ['*'],
+    allowedHeaders: ['*'],
+    allowedMethods: [HttpMethod.POST], 
+  },
+});
+
+// 4. Output the URL to the terminal and Amplify outputs JSON after deployment
+backend.addOutput({
+  custom: {
+    VidaBaileFlowUrl: flowUrl.url,
+  },
 });
