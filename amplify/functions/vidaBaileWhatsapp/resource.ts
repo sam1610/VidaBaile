@@ -10,5 +10,6 @@ export const vidaBaileWhatsapp = defineFunction({
     META_VERIFY_TOKEN:     secret('META_VERIFY_TOKEN'),
     META_APP_SECRET:       secret('META_APP_SECRET'),
     WHATSAPP_ACCESS_TOKEN: secret('WHATSAPP_ACCESS_TOKEN'),
+    WHATSAPP_PHONE_ID: secret('WHATSAPP_PHONE_ID'),
   },
 });

@@ -110,7 +110,7 @@ export const handler = async (event: any) => {
   // ── Meta Webhook Verification (GET) ──────────────────────────────────────
   if (event.requestContext?.http?.method === "GET") {
     const q = event.queryStringParameters || {};
-    const verifyToken = "New#@1235"; // process.env.META_VERIFY_TOKEN;
+    const verifyToken = process.env.META_VERIFY_TOKEN;
     
     if (q["hub.mode"] === "subscribe" && q["hub.verify_token"] === verifyToken) {
       console.log("✅ Webhook verification challenge accepted");
