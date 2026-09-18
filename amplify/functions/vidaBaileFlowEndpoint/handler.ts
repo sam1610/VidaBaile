@@ -1,7 +1,18 @@
 import { DynamoDBClient, QueryCommand, GetItemCommand, PutItemCommand } from "@aws-sdk/client-dynamodb";
 import * as crypto from "crypto";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
+import * as https from "https";
 
-const ddb = new DynamoDBClient({});
+const ddb = new DynamoDBClient({
+  requestHandler: new NodeHttpHandler({
+    connectionTimeout: 3000,
+    socketTimeout: 5000,
+    httpsAgent: new https.Agent({
+      keepAlive: true,
+      maxSockets: 50
+    })
+  })
+});
 const TABLE_NAME = process.env.TABLE_NAME!;
 
 // ────────────────────────────────────────────────────────────────────────────
