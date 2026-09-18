@@ -84,17 +84,19 @@ export const handler = async (event: any) => {
               },
               {
                 type:     "button",
-                sub_type: "quick_reply",
+                sub_type: "flow",
                 index:    "0",
                 parameters: [
                   {
-                    type: "payload",
-                    // Format: BUY_PACKAGE_<packageId>_CAMP#<campaignId>_ADMIN#<adminSub>
-                    // chatAgent parses campaignId to fetch campaignKnowledgeBase
-                    payload: `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`,
-                  },
-                ],
-              },
+                    type: "action",
+                    action: {
+                      // Format: BUY_PACKAGE_<packageId>_CAMP#<campaignId>_ADMIN#<adminSub>
+                      // Sent to your Flow Endpoint Lambda as the 'flow_token' when the user opens the Flow
+                      flow_token: `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`
+                    }
+                  }
+                ]
+              }
             ],
           },
         };
