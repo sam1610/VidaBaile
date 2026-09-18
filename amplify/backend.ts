@@ -98,6 +98,11 @@ backend.vidaBailePayPackage.resources.lambda.addToRolePolicy(
     ],
   }),
 );
+// TODO: Once the payment Secrets Manager secret is created, add:
+//   (backend.vidaBailePayPackage.resources.lambda as LambdaFunction).addEnvironment(
+//     'PAYMENT_SECRET_ARN', '<arn:aws:secretsmanager:REGION:ACCOUNT:secret:payment-secret-xxx>'
+//   );
+// Also grant secretsmanager:GetSecretValue on that ARN in a new PolicyStatement.
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION B: WhatsApp Lambda Functions (ClubRecord table + SQS)
