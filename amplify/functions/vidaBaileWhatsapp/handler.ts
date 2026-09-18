@@ -261,9 +261,36 @@ export const handler = async (event: any) => {
         }
       }
 
+      // Tier 2: Dynamic Webhook Routing via Profile Lookup
       if (!adminSub) {
-        adminSub = "8438c488-7081-70fc-4e23-656f4cdd7fb6";
-        console.log(`🎯 Tier 3 resolved via hard fallback: ${adminSub}`);
+        // Extract the receiving business phone number from the Meta payload
+        const displayPhone = body.entry?.[0]?.changes?.[0]?.value?.metadata?.display_phone_number;
+        
+        if (displayPhone) {
+          const cleanPhone = displayPhone.replace('+', ''); 
+          
+          const profileQuery = await ddb.send(new QueryCommand({
+            TableName: process.env.TABLE_NAME,
+            IndexName: "clubRecordsByGsi1pkAndGsi1sk", // Adjust if your GSI name is different
+            KeyConditionExpression: "gsi1pk = :phone AND gsi1sk = :profile",
+            ExpressionAttributeValues: {
+              ":phone": { S: `WHATSAPP#${cleanPhone}` },
+              ":profile": { S: "PROFILE" }
+            }
+          }));
+
+          if (profileQuery.Items && profileQuery.Items.length > 0) {
+            let adminSub = profileQuery.Items[0].pk?.S;
+            console.log(`🎯 Tier 2 resolved via WhatsApp Number: ${adminSub}`);
+          }
+        }
+      }
+
+      // Tier 3: Graceful Failure (No hardcoded IDs)
+      if (!adminSub) {
+        console.warn("⚠️ Could not resolve adminSub for incoming message. Ignoring.");
+        // Must return 200 OK, otherwise Meta will repeatedly retry sending the dead message
+        return { statusCode: 200, body: "OK" }; 
       }
 
       if (!campaignId) {

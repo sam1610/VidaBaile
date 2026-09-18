@@ -114,13 +114,25 @@ export const handler = async (event: any) => {
     
     // Attempt strict extraction from the payload first
     let adminSub = "";
+
+    // 1. Production Mode: Extract from the secure flow_token passed in the template button
     if (decryptedData.flow_token && decryptedData.flow_token.includes("_ADMIN#")) {
       adminSub = decryptedData.flow_token.split("_ADMIN#")[1];
       console.log(`🎯 Extracted adminSub from Flow Token: ${adminSub}`);
-    } else {
-      // Fallback to environment variable for Meta Flow Builder preview mode
-      adminSub = process.env.DEFAULT_ADMIN_SUB || "8438c488-7081-70fc-4e23-656f4cdd7fb6";
-      console.warn(`⚠️ No adminSub in flow_token. Falling back to default: ${adminSub}`);
+    } 
+    // 2. Preview Mode: Fall back to Amplify environment variable (if set)
+    else if (process.env.DEFAULT_ADMIN_SUB) {
+      adminSub = process.env.DEFAULT_ADMIN_SUB;
+      console.warn(`⚠️ No flow_token found. Using DEV environment fallback: ${adminSub}`);
+    }
+
+    // 3. Graceful Failure: No token and no environment variable. 
+    // This prevents cross-tenant leakage and completely removes the hardcoded ID.
+    if (!adminSub) {
+      console.error("❌ CRITICAL: Flow launched without a valid flow_token.");
+      // Throwing an error here safely closes the Meta Flow UI for the user 
+      // without exposing any other tenant's data.
+      throw new Error("Unauthorized Flow access: Missing tenant context.");
     }
 
     if (decryptedData.action === "INIT") {
