@@ -3,7 +3,6 @@ import * as crypto from "crypto";
 
 const ddb = new DynamoDBClient({});
 const TABLE_NAME = process.env.TABLE_NAME!;
-// Removed the top-level PRIVATE_KEY declaration to prevent cold-start crashes
 
 // ────────────────────────────────────────────────────────────────────────────
 // 1. Meta Flows Cryptography Engine
@@ -110,15 +109,30 @@ export const handler = async (event: any) => {
 
     let responseScreen = "";
     let responseData: any = {};
-    const adminSub = "8438c488-7081-70fc-4e23-656f4cdd7fb6"; // Demo Admin Sub
-
+    
     // ── 2. ROUTING STATE MACHINE ──────────────────────────────────────────
+    
+    // Attempt strict extraction from the payload first
+    let adminSub = "";
+    if (decryptedData.flow_token && decryptedData.flow_token.includes("_ADMIN#")) {
+      adminSub = decryptedData.flow_token.split("_ADMIN#")[1];
+      console.log(`🎯 Extracted adminSub from Flow Token: ${adminSub}`);
+    } else {
+      // Fallback to environment variable for Meta Flow Builder preview mode
+      adminSub = process.env.DEFAULT_ADMIN_SUB || "8438c488-7081-70fc-4e23-656f4cdd7fb6";
+      console.warn(`⚠️ No adminSub in flow_token. Falling back to default: ${adminSub}`);
+    }
+
     if (decryptedData.action === "INIT") {
+      const activePackages = await fetchActivePackages(adminSub);
+      
+      console.log(`📦 Found ${activePackages.length} packages for Admin: ${adminSub}`);
+
       responseScreen = "Packages_Screen";
       responseData = {
-        packages_list: await fetchActivePackages(adminSub)
+        packages_list: activePackages
       };
-    } 
+    }
     else if (decryptedData.action === "data_exchange") {
       const payload = decryptedData.data; 
       
@@ -129,7 +143,7 @@ export const handler = async (event: any) => {
         responseData = {
           package_title: pkg?.packageType?.S || "Unknown Package",
           package_description: `Price: ${pkg?.price?.N || "0"} BHD. Includes exclusive sessions.`,
-          package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop", // Add a real S3 URL here later
+          package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop", 
           is_time_error_visible: false,
           time_error_msg: ""
         };
@@ -143,11 +157,9 @@ export const handler = async (event: any) => {
         if (selectedDate < now) {
           responseScreen = "Package_Details_Screen";
           responseData = {
-            // Re-populate the screen data so it doesn't crash
             package_title: "Selected Package", 
             package_description: "Please select a valid time.",
             package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop",
-            // Trigger the red error text we added to the JSON
             is_time_error_visible: true,
             time_error_msg: "The selected time has already passed. Please choose a future slot."
           };
