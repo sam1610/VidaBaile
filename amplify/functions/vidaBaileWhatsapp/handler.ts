@@ -9,23 +9,27 @@ const INBOUND_CHAT_QUEUE = process.env.INBOUND_CHAT_QUEUE_URL!;
 
 // Helper to validate Meta X-Hub-Signature-256
 function validateMetaSignature(body: string, signatureHeader?: string): boolean {
-  // const appSecret = process.env.META_APP_SECRET;
-  // if (!appSecret || !signatureHeader) return true; // Skip if secret not set (or handle strictly)
+  const appSecret = process.env.META_APP_SECRET;
   
-  // const expectedSignature = "sha256=" + crypto
-  //   .createHmac("sha256", appSecret)
-  //   .update(body)
-  //   .digest("hex");
+  // FAIL CLOSED: Deny access if missing configuration or header
+  if (!appSecret || !signatureHeader) {
+      return false; 
+  }
   
-  // try {
-  //   return crypto.timingSafeEqual(
-  //     Buffer.from(signatureHeader),
-  //     Buffer.from(expectedSignature)
-  //   );
-  // } catch {
-  //   return false;
-  // }
-  return true
+  const expectedSignature = "sha256=" + crypto
+    .createHmac("sha256", appSecret)
+    .update(body)
+    .digest("hex");
+  
+  const signatureBuffer = Buffer.from(signatureHeader, 'utf8');
+  const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
+
+  // Prevent timingSafeEqual from throwing an error due to length mismatch
+  if (signatureBuffer.byteLength !== expectedBuffer.byteLength) {
+      return false;
+  }
+  
+  return crypto.timingSafeEqual(signatureBuffer, expectedBuffer);
 }
 
 async function findBroadcastReceiptByWamid(wamid: string) {
