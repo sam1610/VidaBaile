@@ -512,14 +512,18 @@ const amplifyOutputs: any = {
             "FACILITY",
             "CATALOG",
             "BROADCAST",
-            "BROADCAST_RECEIPT"
+            "BROADCAST_RECEIPT",
+            "PROFILE"
           ]
         }
       },
       "nonModels": {}
     }
   },
-  "version": "1.5"
+  "version": "1.5",
+  "custom": {
+    "VidaBaileFlowUrl": "https://kqoqpaczj6suso5xymufp5b6la0toirc.lambda-url.us-east-1.on.aws/"
+  }
 };
 
 export default amplifyOutputs;
