@@ -57,21 +57,45 @@ function encryptMetaResponse(responseData: any, aesKey: Buffer, originalIv: Buff
 // 2. Data Fetching Helpers
 // ────────────────────────────────────────────────────────────────────────────
 async function fetchActivePackages(adminSub: string) {
+  // Generates "YYYY-MM-DD" to perfectly match your DynamoDB validFrom/validUntil format
+  const today = new Date().toISOString().split("T")[0]; 
+
   const res = await ddb.send(new QueryCommand({
     TableName: TABLE_NAME,
-    IndexName: "clubRecordsByGsi1pkAndGsi1sk",
-    KeyConditionExpression: "gsi1pk = :gsi1pk AND begins_with(gsi1sk, :prefix)",
+    // Removed IndexName to query the primary table directly
+    KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
     ExpressionAttributeValues: {
-      ":gsi1pk": { S: `${adminSub}#CATALOG` },
-      ":prefix": { S: "STATUS#ACTIVE" }
+      ":pk": { S: adminSub },
+      ":prefix": { S: "BROADCAST#" }
     }
   }));
   
-  return (res.Items || []).map(item => ({
-    id: item.sk?.S?.replace("CATALOG#", "") || "",
-    title: item.packageType?.S || "Package",
-    description: `${item.price?.N || item.price?.S || "0"} BHD`
-  }));
+  const items = res.Items || [];
+
+  // Filter active broadcasts based on date and map them to the Flow UI schema
+  const activePackages = items.filter(item => {
+    const validFrom = item.validFrom?.S;
+    const validUntil = item.validUntil?.S;
+    
+    // Ensure the broadcast has validity dates and is currently active
+    if (validFrom && validUntil) {
+      return validFrom <= today && validUntil >= today;
+    }
+    return false;
+  }).map(item => {
+    // Strip "CATALOG#" so fetchPackageById doesn't duplicate it in the next step
+    const rawPackageId = item.packageIntent?.S?.replace("CATALOG#", "") || "";
+    
+    return {
+      id: rawPackageId, 
+      title: item.name?.S || "Dance Package",
+      description: item.promotionalContent?.S 
+        ? item.promotionalContent.S.substring(0, 60) 
+        : "Exclusive dance offer" 
+    };
+  });
+
+  return activePackages;
 }
 
 async function fetchPackageById(adminSub: string, packageId: string) {
