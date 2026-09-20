@@ -112,6 +112,29 @@ async function fetchPackageById(adminSub: string, packageId: string) {
   return res.Item;
 }
 
+async function fetchActiveBroadcastByPackageId(
+  adminSub: string,
+  packageId: string
+): Promise<{ validFrom?: string; validUntil?: string } | null> {
+  const today = new Date().toISOString().split("T")[0];
+  const res = await ddb.send(new QueryCommand({
+    TableName: TABLE_NAME,
+    KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+    ExpressionAttributeValues: {
+      ":pk":     { S: adminSub },
+      ":prefix": { S: "BROADCAST#" },
+    },
+  }));
+  const match = (res.Items || []).find(item => {
+    const ref = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
+    const vf  = item.validFrom?.S;
+    const vu  = item.validUntil?.S;
+    return ref === packageId && vf && vu && vf <= today && vu >= today;
+  });
+  if (!match) return null;
+  return { validFrom: match.validFrom?.S, validUntil: match.validUntil?.S };
+}
+
 // ────────────────────────────────────────────────────────────────────────────
 // 4. Main Handler
 // ────────────────────────────────────────────────────────────────────────────
@@ -165,28 +188,60 @@ export const handler = async (event: any) => {
           time_error_msg: ""
         };
       }
-      else if (payload.action === "VALIDATE_BOOKING") {
-        const selectedDate = new Date(`${payload.date}T${payload.time}:00`);
+      else if (payload.action === "VALIDATE_BOOKING" || (payload.package_id && payload.date && payload.time && !payload.action)) {
+        const selectedDateStr: string = payload.date; // YYYY-MM-DD
+        const selectedDateTime = new Date(`${selectedDateStr}T${payload.time}:00`);
         const now = new Date();
 
-        if (selectedDate < now) {
+        // ── 1. Check selected date is not in the past ────────────────────
+        if (selectedDateTime < now) {
+          // Re-fetch the package details to re-render the screen correctly
+          const pkg = await fetchPackageById(adminSub, payload.package_id);
           responseScreen = "Package_Details_Screen";
           responseData = {
-            package_id: payload.package_id, // State passthrough
-            package_title: "Selected Package", 
-            package_description: "Please select a valid time.",
-            package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop",
+            package_id:            payload.package_id,
+            package_title:         pkg?.packageType?.S || pkg?.name?.S || "Package",
+            package_description:   `Price: ${pkg?.price?.N || "0"} BHD. Includes exclusive sessions.`,
+            package_image_url:     "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop",
             is_time_error_visible: true,
-            time_error_msg: "The selected time has already passed. Please choose a future slot."
+            time_error_msg:        "⚠️ The selected date/time has already passed. Please choose a future slot.",
           };
         } else {
-          responseScreen = "Validation_Screen";
-          responseData = {
-            package_id: payload.package_id, // State passthrough
-            date: payload.date,             // State passthrough
-            time: payload.time,             // State passthrough
-            summary_text: `You are requesting a booking for ${payload.date} at ${payload.time}.`
-          };
+          // ── 2. Check selected date is within the broadcast validity window ──
+          // The validity range lives on the BROADCAST record, not the CATALOG.
+          // Query active packages and find the one matching this packageId.
+          const activePackages = await fetchActiveBroadcastByPackageId(adminSub, payload.package_id);
+          const validFrom  = activePackages?.validFrom;   // YYYY-MM-DD or undefined
+          const validUntil = activePackages?.validUntil;  // YYYY-MM-DD or undefined
+
+          const isOutsideValidity =
+            (validFrom  && selectedDateStr < validFrom) ||
+            (validUntil && selectedDateStr > validUntil);
+
+          if (isOutsideValidity) {
+            const pkg = await fetchPackageById(adminSub, payload.package_id);
+            const rangeMsg = validFrom && validUntil
+              ? `Valid enrollment dates: ${validFrom} to ${validUntil}.`
+              : validUntil ? `Must enroll before ${validUntil}.` : "Please select a valid date.";
+            responseScreen = "Package_Details_Screen";
+            responseData = {
+              package_id:            payload.package_id,
+              package_title:         pkg?.packageType?.S || pkg?.name?.S || "Package",
+              package_description:   `Price: ${pkg?.price?.N || "0"} BHD. Includes exclusive sessions.`,
+              package_image_url:     "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop",
+              is_time_error_visible: true,
+              time_error_msg:        `⚠️ Selected date is outside the package enrollment window. ${rangeMsg}`,
+            };
+          } else {
+            // ── 3. Date is valid — proceed to confirmation screen ──────────
+            responseScreen = "Validation_Screen";
+            responseData = {
+              package_id:   payload.package_id,
+              date:         payload.date,
+              time:         payload.time,
+              summary_text: `You are booking the ${validUntil ? `package valid until ${validUntil}` : "package"} starting ${payload.date} at ${payload.time}. Please confirm.`,
+            };
+          }
         }
       }
       else if (payload.action === "FINALIZE_SUBMISSION") {
