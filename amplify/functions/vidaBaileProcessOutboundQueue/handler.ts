@@ -29,6 +29,8 @@ const ddb = new DynamoDBClient({});
 const TABLE_NAME        = process.env.TABLE_NAME!;
 const META_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN!;
 const PHONE_NUMBER_ID   = process.env.WHATSAPP_PHONE_ID!;
+const FLOW_ID           = process.env.WHATSAPP_FLOW_ID!;
+const FLOW_CTA          = process.env.WHATSAPP_FLOW_CTA ?? "View Packages";
 
 export const handler = async (event: any) => {
   console.log("📨 Processing outbound broadcast queue");
@@ -66,40 +68,40 @@ export const handler = async (event: any) => {
       let metaPayload: object;
 
       if (templateName === "promo_offer") {
-      metaPayload = {
-      messaging_product: "whatsapp",
-      recipient_type:    "individual",
-      to:                targetNumber,
-      type:              "template",
-      template: {
-      name:     "promo_offer",
-      language: { code: "en" },
-      components: [
-        {
-          type: "body",
-          parameters: [
-            { type: "text", text: recipientName },
-            { type: "text", text: promotionalContent || "Special offer inside!" },
-          ],
-        },
-        {
-          type:     "button",
-          sub_type: "flow",
-          index:    "0",
-          parameters: [
-            {
-              type: "action",
-              action: {
-        // ONLY pass the token. Meta rejects anything else for template messages.
-        flow_token: `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`
-      }
-            }
-          ]
-        }
-      ],
-    },
-  };
-} else {
+        // Use interactive/flow message type so the physical WhatsApp client
+        // receives flow_action + flow_action_payload and fires the INIT request.
+        // Meta template messages do NOT support these fields (returns HTTP 400).
+        metaPayload = {
+          messaging_product: "whatsapp",
+          recipient_type:    "individual",
+          to:                targetNumber,
+          type:              "interactive",
+          interactive: {
+            type: "flow",
+            header: {
+              type: "text",
+              text: "VidaBaile — Exclusive Offer",
+            },
+            body: {
+              text: promotionalContent || "We have a special package waiting for you. Tap below to explore!",
+            },
+            footer: {
+              text: "Reply STOP to unsubscribe",
+            },
+            action: {
+              name: "flow",
+              parameters: {
+                flow_message_version: "3",
+                flow_token:           `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`,
+                flow_id:              FLOW_ID,
+                flow_cta:             FLOW_CTA,
+                flow_action:          "navigate",
+                flow_action_payload:  { screen: "PACKAGES_SCREEN" },
+              },
+            },
+          },
+        };
+      } else {
         metaPayload = {
           messaging_product: "whatsapp",
           recipient_type:    "individual",
