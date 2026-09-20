@@ -29,7 +29,7 @@ const ddb = new DynamoDBClient({});
 const TABLE_NAME        = process.env.TABLE_NAME!;
 const META_ACCESS_TOKEN = process.env.WHATSAPP_ACCESS_TOKEN!;
 const PHONE_NUMBER_ID   = process.env.WHATSAPP_PHONE_ID!;
-const FLOW_ID           = process.env.WHATSAPP_FLOW_ID!;
+const FLOW_ID           = process.env.WHATSAPP_FLOW_ID ?? "";
 const FLOW_CTA          = process.env.WHATSAPP_FLOW_CTA ?? "View Packages";
 
 export const handler = async (event: any) => {
@@ -71,6 +71,11 @@ export const handler = async (event: any) => {
         // Use interactive/flow message type so the physical WhatsApp client
         // receives flow_action + flow_action_payload and fires the INIT request.
         // Meta template messages do NOT support these fields (returns HTTP 400).
+        // Guard: FLOW_ID must be set before sending an interactive flow message
+        if (!FLOW_ID) {
+          throw new Error("WHATSAPP_FLOW_ID environment variable is not set — cannot send interactive flow message");
+        }
+
         metaPayload = {
           messaging_product: "whatsapp",
           recipient_type:    "individual",
@@ -80,7 +85,7 @@ export const handler = async (event: any) => {
             type: "flow",
             header: {
               type: "text",
-              text: "VidaBaile — Exclusive Offer",
+              text:  "VidaBaile — Exclusive Offer",
             },
             body: {
               text: promotionalContent || "We have a special package waiting for you. Tap below to explore!",
@@ -95,8 +100,12 @@ export const handler = async (event: any) => {
                 flow_token:           `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`,
                 flow_id:              FLOW_ID,
                 flow_cta:             FLOW_CTA,
+                mode:                 "published",
                 flow_action:          "navigate",
-                flow_action_payload:  { screen: "PACKAGES_SCREEN" },
+                // flow_action_payload omitted — defaults to FIRST_ENTRY_SCREEN which triggers INIT correctly.
+                // If you need to navigate to a specific screen, set:
+                //   flow_action_payload: JSON.stringify({ screen: "YOUR_SCREEN_ID", data: {} })
+                // Note: Meta requires flow_action_payload to be a JSON-encoded STRING, not an object.
               },
             },
           },
