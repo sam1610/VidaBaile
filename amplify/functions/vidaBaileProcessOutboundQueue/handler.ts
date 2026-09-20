@@ -120,6 +120,8 @@ export const handler = async (event: any) => {
         };
       }
 
+      console.log(`📤 Payload type: ${ (metaPayload as any).type } | FLOW_ID: ${FLOW_ID} | templateName: ${templateName}`);
+
       // ── 4. Send via Meta WhatsApp Cloud API ──────────────────────────────
       const response = await fetch(
         `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
@@ -135,6 +137,8 @@ export const handler = async (event: any) => {
 
       const metaData: any = await response.json();
       if (!response.ok) {
+        // Log the full error body so error_data.details is visible in CloudWatch
+        console.error(`❌ Meta API full error:`, JSON.stringify(metaData));
         throw new Error(
           `Meta API error (${response.status}): ${metaData.error?.message ?? JSON.stringify(metaData)}`
         );
