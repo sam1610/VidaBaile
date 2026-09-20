@@ -62,26 +62,41 @@ function resolveTenantSub(decryptedData: any): string {
 // 3. Data Fetching Helpers
 // ────────────────────────────────────────────────────────────────────────────
 async function fetchActivePackages(adminSub: string) {
+  // Get today's date in YYYY-MM-DD format to match your DynamoDB records
+  const today = new Date().toISOString().split("T")[0]; 
+
   const res = await ddb.send(new QueryCommand({
     TableName: TABLE_NAME,
     KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
     ExpressionAttributeValues: {
       ":pk": { S: adminSub },
-      ":prefix": { S: "CATALOG#" } // Fixed prefix
+      ":prefix": { S: "BROADCAST#" } // Target broadcast items
     }
   }));
   
   const items = res.Items || [];
   
-  // Mapping directly without strict date filtering to ensure your current DB items appear
-  return items.map(item => {
-    const rawPackageId = item.sk?.S?.replace("CATALOG#", "") || "";
+  // 1. Filter out expired or future broadcasts
+  // 2. Map to the Flow UI Schema
+  return items.filter(item => {
+    const validFrom = item.validFrom?.S;
+    const validUntil = item.validUntil?.S;
+    
+    // Only include broadcasts where today falls within the valid range
+    if (validFrom && validUntil) {
+      return validFrom <= today && validUntil >= today;
+    }
+    return false;
+  }).map(item => {
+    // Extract the catalog ID from packageRef (e.g. "CATALOG#hgrnsPSmG_QW3GcrcFS5D")
+    const rawPackageId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
+    
     return {
       id: rawPackageId, 
-      title: item.packageType?.S || item.name?.S || "Dance Package",
+      title: item.name?.S || "Dance Package",
       description: item.promotionalContent?.S 
         ? item.promotionalContent.S.substring(0, 60) 
-        : (item.notes?.S || "Exclusive dance offer")
+        : "Exclusive dance offer"
     };
   });
 }
