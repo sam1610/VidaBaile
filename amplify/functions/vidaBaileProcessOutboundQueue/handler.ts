@@ -101,12 +101,11 @@ export const handler = async (event: any) => {
                 flow_id:              FLOW_ID,
                 flow_cta:             FLOW_CTA,
                 mode:                 "published",
-                flow_action:          "navigate",
-                // flow_action_payload must be a JSON-encoded STRING (not an object).
-                // It must match the exact screen id defined in the Flow JSON.
-                // Our first screen id is "Packages_Screen" — this triggers the INIT request
-                // which fetches the dynamic package list from vidaBaileFlowEndpoint.
-                flow_action_payload:  JSON.stringify({ screen: "Packages_Screen" }),
+                // data_exchange instructs the physical WhatsApp client to immediately
+                // call our endpoint with action:"INIT" when the button is tapped.
+                // "navigate" does NOT trigger a server call — it just opens the screen statically.
+                flow_action:          "data_exchange",
+                // flow_action_payload must NOT be set when flow_action is "data_exchange"
               },
             },
           },
