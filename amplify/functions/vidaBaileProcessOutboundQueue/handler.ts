@@ -66,41 +66,44 @@ export const handler = async (event: any) => {
       let metaPayload: object;
 
       if (templateName === "promo_offer") {
-        metaPayload = {
-          messaging_product: "whatsapp",
-          recipient_type:    "individual",
-          to:                targetNumber,
-          type:              "template",
-          template: {
-            name:     "promo_offer",
-            language: { code: "en" },
-            components: [
-              {
-                type: "body",
-                parameters: [
-                  { type: "text", text: recipientName },
-                  { type: "text", text: promotionalContent || "Special offer inside!" },
-                ],
-              },
-              {
-                type:     "button",
-                sub_type: "flow",
-                index:    "0",
-                parameters: [
-                  {
-                    type: "action",
-                    action: {
-                      // Format: BUY_PACKAGE_<packageId>_CAMP#<campaignId>_ADMIN#<adminSub>
-                      // Sent to your Flow Endpoint Lambda as the 'flow_token' when the user opens the Flow
-                      flow_token: `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`
-                    }
-                  }
-                ]
+      metaPayload = {
+      messaging_product: "whatsapp",
+      recipient_type:    "individual",
+      to:                targetNumber,
+      type:              "template",
+      template: {
+      name:     "promo_offer",
+      language: { code: "en" },
+      components: [
+        {
+          type: "body",
+          parameters: [
+            { type: "text", text: recipientName },
+            { type: "text", text: promotionalContent || "Special offer inside!" },
+          ],
+        },
+        {
+          type:     "button",
+          sub_type: "flow",
+          index:    "0",
+          parameters: [
+            {
+              type: "action",
+              action: {
+                flow_token: `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`,
+                // ADD THESE TWO PROPERTIES:
+                flow_action: "navigate",
+                flow_action_payload: {
+                  screen: "Packages_Screen" // Forces the phone to fire the INIT request for this screen
+                }
               }
-            ],
-          },
-        };
-      } else {
+            }
+          ]
+        }
+      ],
+    },
+  };
+} else {
         metaPayload = {
           messaging_product: "whatsapp",
           recipient_type:    "individual",
