@@ -147,6 +147,7 @@ export const handler = async (event: any) => {
       responseData = {
         packages_list: activePackages // Matches "${data.packages_list}" in Flow JSON
       };
+      console.log(`📋 INIT response payload:`, JSON.stringify(responseData));
     }
     else if (decryptedData.action === "data_exchange") {
       const payload = decryptedData.data; 
