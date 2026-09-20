@@ -90,13 +90,9 @@ export const handler = async (event: any) => {
             {
               type: "action",
               action: {
-                flow_token: `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`,
-                // ADD THESE TWO PROPERTIES:
-                flow_action: "navigate",
-                flow_action_payload: {
-                  screen: "Packages_Screen" // Forces the phone to fire the INIT request for this screen
-                }
-              }
+        // ONLY pass the token. Meta rejects anything else for template messages.
+        flow_token: `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_ADMIN#${adminSub}`
+      }
             }
           ]
         }
