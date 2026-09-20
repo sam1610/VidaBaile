@@ -153,7 +153,7 @@ export const handler = async (event: any) => {
       const payload = decryptedData.data;
       console.log(`🔄 data_exchange payload:`, JSON.stringify(payload));
       
-      if (payload.action === "FETCH_PACKAGE_DETAILS") {
+      if (payload.action === "FETCH_PACKAGE_DETAILS" || (payload.package_id && !payload.action)) {
         const pkg = await fetchPackageById(adminSub, payload.package_id);
         responseScreen = "Package_Details_Screen";
         responseData = {
