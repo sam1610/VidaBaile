@@ -7,10 +7,7 @@ const ddb = new DynamoDBClient({
   requestHandler: new NodeHttpHandler({
     connectionTimeout: 3000,
     socketTimeout: 5000,
-    httpsAgent: new https.Agent({
-      keepAlive: true,
-      maxSockets: 50
-    })
+    httpsAgent: new https.Agent({ keepAlive: true, maxSockets: 50 })
   })
 });
 const TABLE_NAME = process.env.TABLE_NAME!;
@@ -20,82 +17,73 @@ const TABLE_NAME = process.env.TABLE_NAME!;
 // ────────────────────────────────────────────────────────────────────────────
 function decryptMetaRequest(body: any, privateKey: string) {
   const { encrypted_aes_key, encrypted_flow_data, initial_vector } = body;
-
   const aesKey = crypto.privateDecrypt(
     { key: privateKey, padding: crypto.constants.RSA_PKCS1_OAEP_PADDING, oaepHash: "sha256" },
     Buffer.from(encrypted_aes_key, "base64")
   );
-
   const iv = Buffer.from(initial_vector, "base64");
   const flowBuffer = Buffer.from(encrypted_flow_data, "base64");
   const authTagOffset = flowBuffer.length - 16;
-
   const decipher = crypto.createDecipheriv("aes-128-gcm", aesKey, iv);
   decipher.setAuthTag(flowBuffer.subarray(authTagOffset));
-  const payload = Buffer.concat([
-    decipher.update(flowBuffer.subarray(0, authTagOffset)), 
-    decipher.final()
-  ]);
-
+  const payload = Buffer.concat([decipher.update(flowBuffer.subarray(0, authTagOffset)), decipher.final()]);
   return { aesKey, iv, data: JSON.parse(payload.toString("utf8")) };
 }
 
 function encryptMetaResponse(responseData: any, aesKey: Buffer, originalIv: Buffer) {
   const flippedIv = Buffer.alloc(16);
   for (let i = 0; i < 16; i++) flippedIv[i] = ~originalIv[i];
-
   const cipher = crypto.createCipheriv("aes-128-gcm", aesKey, flippedIv);
-  const encrypted = Buffer.concat([
-    cipher.update(Buffer.from(JSON.stringify(responseData), "utf8")), 
-    cipher.final()
-  ]);
-  
+  const encrypted = Buffer.concat([cipher.update(Buffer.from(JSON.stringify(responseData), "utf8")), cipher.final()]);
   return Buffer.concat([encrypted, cipher.getAuthTag()]).toString("base64");
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// 2. Data Fetching Helpers
+// 2. Multi-Tenant Context Resolver
+// ────────────────────────────────────────────────────────────────────────────
+function resolveTenantSub(decryptedData: any): string {
+  const token = decryptedData?.flow_token;
+  if (token) {
+    if (token.includes("_ADMIN#")) return token.split("_ADMIN#")[1];
+    try {
+      const decoded = JSON.parse(Buffer.from(token, "base64").toString("utf8"));
+      if (decoded?.adminSub) return decoded.adminSub;
+    } catch { /* Ignore base64 parse errors */ }
+  }
+  // Fallback for Meta Preview Panel & Health Checks (Controlled via Environment)
+  if (process.env.DEFAULT_ADMIN_SUB) {
+    console.log(`ℹ️ Using environment-configured default adminSub: ${process.env.DEFAULT_ADMIN_SUB}`);
+    return process.env.DEFAULT_ADMIN_SUB;
+  }
+  throw new Error("Unauthorized Flow access: Missing tenant context.");
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 3. Data Fetching Helpers
 // ────────────────────────────────────────────────────────────────────────────
 async function fetchActivePackages(adminSub: string) {
-  // Generates "YYYY-MM-DD" to perfectly match your DynamoDB validFrom/validUntil format
-  const today = new Date().toISOString().split("T")[0]; 
-
   const res = await ddb.send(new QueryCommand({
     TableName: TABLE_NAME,
-    // Removed IndexName to query the primary table directly
     KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
     ExpressionAttributeValues: {
       ":pk": { S: adminSub },
-      ":prefix": { S: "BROADCAST#" }
+      ":prefix": { S: "CATALOG#" } // Fixed prefix
     }
   }));
   
   const items = res.Items || [];
-
-  // Filter active broadcasts based on date and map them to the Flow UI schema
-  const activePackages = items.filter(item => {
-    const validFrom = item.validFrom?.S;
-    const validUntil = item.validUntil?.S;
-    
-    // Ensure the broadcast has validity dates and is currently active
-    if (validFrom && validUntil) {
-      return validFrom <= today && validUntil >= today;
-    }
-    return false;
-  }).map(item => {
-    // Strip "CATALOG#" so fetchPackageById doesn't duplicate it in the next step
-    const rawPackageId = item.packageIntent?.S?.replace("CATALOG#", "") || "";
-    
+  
+  // Mapping directly without strict date filtering to ensure your current DB items appear
+  return items.map(item => {
+    const rawPackageId = item.sk?.S?.replace("CATALOG#", "") || "";
     return {
       id: rawPackageId, 
-      title: item.name?.S || "Dance Package",
+      title: item.packageType?.S || item.name?.S || "Dance Package",
       description: item.promotionalContent?.S 
         ? item.promotionalContent.S.substring(0, 60) 
-        : "Exclusive dance offer" 
+        : (item.notes?.S || "Exclusive dance offer")
     };
   });
-
-  return activePackages;
 }
 
 async function fetchPackageById(adminSub: string, packageId: string) {
@@ -110,100 +98,64 @@ async function fetchPackageById(adminSub: string, packageId: string) {
 }
 
 // ────────────────────────────────────────────────────────────────────────────
-// 3. Main Handler
+// 4. Main Handler
 // ────────────────────────────────────────────────────────────────────────────
 export const handler = async (event: any) => {
   console.log("🌊 Flow Endpoint Triggered");
 
   try {
-    // Safely load and sanitize the key INSIDE the execution context
     const rawKey = process.env.FLOW_PRIVATE_KEY || "";
     const PRIVATE_KEY = rawKey.replace(/\\n/g, '\n');
-
-    if (!PRIVATE_KEY) {
-      console.error("❌ CRITICAL: FLOW_PRIVATE_KEY is missing from environment variables.");
-    }
+    if (!PRIVATE_KEY) console.error("❌ CRITICAL: FLOW_PRIVATE_KEY is missing.");
 
     let bodyStr = event.body || "{}";
-    if (event.isBase64Encoded) {
-      bodyStr = Buffer.from(bodyStr, "base64").toString("utf8");
-    }
+    if (event.isBase64Encoded) bodyStr = Buffer.from(bodyStr, "base64").toString("utf8");
     const body = JSON.parse(bodyStr);
 
     const { aesKey, iv, data: decryptedData } = decryptMetaRequest(body, PRIVATE_KEY);
     console.log("🔓 Decrypted payload action:", decryptedData.action);
 
-    // ── 1. HEALTH CHECK PING ──────────────────────────────────────────────
     if (decryptedData.action === "ping") {
-      console.log("🏓 Ping received, returning active status.");
-      return {
-        statusCode: 200,
-        body: encryptMetaResponse({ data: { status: "active" } }, aesKey, iv)
-      };
+      return { statusCode: 200, body: encryptMetaResponse({ data: { status: "active" } }, aesKey, iv) };
     }
 
+    const adminSub = resolveTenantSub(decryptedData);
     let responseScreen = "";
     let responseData: any = {};
     
-    // ── 2. ROUTING STATE MACHINE ──────────────────────────────────────────
-    
-    // Attempt strict extraction from the payload first
-    let adminSub = "";
-
-    // 1. Production Mode: Extract from the secure flow_token passed in the template button
-    if (decryptedData.flow_token && decryptedData.flow_token.includes("_ADMIN#")) {
-      adminSub = decryptedData.flow_token.split("_ADMIN#")[1];
-      console.log(`🎯 Extracted adminSub from Flow Token: ${adminSub}`);
-    } 
-    // 2. Preview Mode: Fall back to Amplify environment variable (if set)
-    else if (process.env.DEFAULT_ADMIN_SUB) {
-      adminSub = process.env.DEFAULT_ADMIN_SUB;
-      console.warn(`⚠️ No flow_token found. Using DEV environment fallback: ${adminSub}`);
-    }
-
-    // 3. Graceful Failure: No token and no environment variable. 
-    // This prevents cross-tenant leakage and completely removes the hardcoded ID.
-    if (!adminSub) {
-      console.error("❌ CRITICAL: Flow launched without a valid flow_token.");
-      // Throwing an error here safely closes the Meta Flow UI for the user 
-      // without exposing any other tenant's data.
-      throw new Error("Unauthorized Flow access: Missing tenant context.");
-    }
-
+    // ── ROUTING STATE MACHINE ──
     if (decryptedData.action === "INIT") {
       const activePackages = await fetchActivePackages(adminSub);
-      
       console.log(`📦 Found ${activePackages.length} packages for Admin: ${adminSub}`);
 
       responseScreen = "Packages_Screen";
       responseData = {
-        packages_list: activePackages
+        packages_list: activePackages // Matches "${data.packages_list}" in Flow JSON
       };
     }
     else if (decryptedData.action === "data_exchange") {
       const payload = decryptedData.data; 
       
-      // -- A. Package Selection --
       if (payload.action === "FETCH_PACKAGE_DETAILS") {
         const pkg = await fetchPackageById(adminSub, payload.package_id);
         responseScreen = "Package_Details_Screen";
         responseData = {
-          package_title: pkg?.packageType?.S || "Unknown Package",
+          package_id: payload.package_id, // State passthrough
+          package_title: pkg?.packageType?.S || pkg?.name?.S || "Unknown Package",
           package_description: `Price: ${pkg?.price?.N || "0"} BHD. Includes exclusive sessions.`,
           package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop", 
           is_time_error_visible: false,
           time_error_msg: ""
         };
       }
-      // -- B. Time/Date Validation --
       else if (payload.action === "VALIDATE_BOOKING") {
         const selectedDate = new Date(`${payload.date}T${payload.time}:00`);
         const now = new Date();
 
-        // Validation Logic: Date cannot be in the past
         if (selectedDate < now) {
           responseScreen = "Package_Details_Screen";
           responseData = {
+            package_id: payload.package_id, // State passthrough
             package_title: "Selected Package", 
             package_description: "Please select a valid time.",
             package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop",
@@ -211,14 +163,15 @@ export const handler = async (event: any) => {
             time_error_msg: "The selected time has already passed. Please choose a future slot."
           };
         } else {
-          // Validation passed! Move to confirmation screen.
           responseScreen = "Validation_Screen";
           responseData = {
+            package_id: payload.package_id, // State passthrough
+            date: payload.date,             // State passthrough
+            time: payload.time,             // State passthrough
             summary_text: `You are requesting a booking for ${payload.date} at ${payload.time}.`
           };
         }
       }
-      // -- C. Final Submission --
       else if (payload.action === "FINALIZE_SUBMISSION") {
         const bookingId = crypto.randomUUID();
         const timestamp = new Date().toISOString();
@@ -243,7 +196,6 @@ export const handler = async (event: any) => {
       }
     }
 
-    // ── 3. ENCRYPT AND RETURN UI PAYLOAD ──────────────────────────────────
     return {
       statusCode: 200,
       body: encryptMetaResponse({ screen: responseScreen, data: responseData }, aesKey, iv)
