@@ -150,7 +150,8 @@ export const handler = async (event: any) => {
       console.log(`📋 INIT response payload:`, JSON.stringify(responseData));
     }
     else if (decryptedData.action === "data_exchange") {
-      const payload = decryptedData.data; 
+      const payload = decryptedData.data;
+      console.log(`🔄 data_exchange payload:`, JSON.stringify(payload));
       
       if (payload.action === "FETCH_PACKAGE_DETAILS") {
         const pkg = await fetchPackageById(adminSub, payload.package_id);
@@ -209,6 +210,14 @@ export const handler = async (event: any) => {
 
         responseScreen = "Terminal_Success";
         responseData = {};
+      }
+      else {
+        // Unknown action — log it so we can diagnose unexpected payloads
+        console.error(`❌ Unknown data_exchange action: ${payload?.action}. Full payload:`, JSON.stringify(payload));
+        // Return the packages screen as a safe fallback so the user isn't stuck
+        const activePackages = await fetchActivePackages(adminSub);
+        responseScreen = "Packages_Screen";
+        responseData = { packages_list: activePackages };
       }
     }
 
