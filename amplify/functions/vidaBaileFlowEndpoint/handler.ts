@@ -96,15 +96,18 @@ async function fetchActivePackages(adminSub: string) {
     }
     return false;
   }).map(item => {
-    // Extract the catalog ID from packageRef (e.g. "CATALOG#hgrnsPSmG_QW3GcrcFS5D")
-    const rawPackageId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
-    
+    // Use broadcast ID as the unique RadioButtonsGroup id (avoids duplicate id when
+    // multiple broadcasts reference the same catalog package).
+    // Encode catalog packageId into the id so FETCH_PACKAGE_DETAILS can resolve it.
+    // Format: "<broadcastId>|<catalogPackageId>"
+    const broadcastId = (item.sk?.S || "").replace("BROADCAST#", "");
+    const catalogPackageId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
     return {
-      id: rawPackageId, 
-      title: item.name?.S || "Dance Package",
-      description: item.promotionalContent?.S 
-        ? item.promotionalContent.S.substring(0, 60) 
-        : "Exclusive dance offer"
+      id:          `${broadcastId}|${catalogPackageId}`,
+      title:       item.name?.S || "Dance Package",
+      description: item.promotionalContent?.S
+        ? item.promotionalContent.S.substring(0, 60)
+        : "Exclusive dance offer",
     };
   });
 }
@@ -203,12 +206,15 @@ export const handler = async (event: any) => {
       console.log(`🔄 data_exchange payload:`, JSON.stringify(payload));
       
       if (payload.action === "FETCH_PACKAGE_DETAILS" || (payload.package_id && !payload.date && !payload.time && !payload.action)) {
-        const pkg      = await fetchPackageById(adminSub, payload.package_id);
-        const validity = await fetchActiveBroadcastByPackageId(adminSub, payload.package_id);
+        // package_id may be "<broadcastId>|<catalogPackageId>" — split to get catalog id
+        const parts       = (payload.package_id as string).split("|");
+        const catalogId   = parts.length === 2 ? parts[1] : parts[0];
+        const pkg      = await fetchPackageById(adminSub, catalogId);
+        const validity = await fetchActiveBroadcastByPackageId(adminSub, catalogId);
         const today    = new Date().toISOString().split("T")[0];
         responseScreen = "Package_Details_Screen";
         responseData = {
-          package_id:            payload.package_id,
+          package_id:            catalogId,   // pass catalog ID downstream for booking
           package_title:         pkg?.packageType?.S || pkg?.name?.S || "Unknown Package",
           package_description:   `Price: ${pkg?.price?.N || "0"} BHD. Includes exclusive sessions.`,
           package_image_url:     "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop",
