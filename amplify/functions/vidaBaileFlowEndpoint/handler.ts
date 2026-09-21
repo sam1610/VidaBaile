@@ -1,4 +1,4 @@
-import { DynamoDBClient, QueryCommand, GetItemCommand, PutItemCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, QueryCommand, GetItemCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
 import * as crypto from "crypto";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import * as https from "https";
