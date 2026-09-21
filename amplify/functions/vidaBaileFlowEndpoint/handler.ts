@@ -202,7 +202,7 @@ export const handler = async (event: any) => {
       const payload = decryptedData.data;
       console.log(`🔄 data_exchange payload:`, JSON.stringify(payload));
       
-      if (payload.action === "FETCH_PACKAGE_DETAILS" || (payload.package_id && !payload.action)) {
+      if (payload.action === "FETCH_PACKAGE_DETAILS" || (payload.package_id && !payload.date && !payload.time && !payload.action)) {
         const pkg      = await fetchPackageById(adminSub, payload.package_id);
         const validity = await fetchActiveBroadcastByPackageId(adminSub, payload.package_id);
         const today    = new Date().toISOString().split("T")[0];
