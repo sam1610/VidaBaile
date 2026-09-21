@@ -217,10 +217,6 @@ export const handler = async (event: any) => {
           // DatePicker bounds — constrain selection to the broadcast validity window
           valid_from:  validity?.validFrom  ?? today,
           valid_until: validity?.validUntil ?? "2099-12-31",
-          // Pre-select today (or validFrom if today is before the window opens)
-          init_date:   (validity?.validFrom && validity.validFrom > today)
-                         ? validity.validFrom
-                         : today,
         };
       }
       else if (payload.action === "VALIDATE_BOOKING" || (payload.package_id && payload.date && payload.time && !payload.action)) {
