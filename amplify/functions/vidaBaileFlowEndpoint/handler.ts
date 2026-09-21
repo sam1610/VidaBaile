@@ -222,7 +222,7 @@ export const handler = async (event: any) => {
       else if (payload.action === "PREPARE_VALIDATION" || payload.action === "VALIDATE_BOOKING" || (payload.package_id && payload.date && payload.time && !payload.action)) {
         // PREPARE_VALIDATION: skip server-side validation, go directly to confirm screen
         // Date bounds are enforced by the DatePicker min-date/max-date on the client.
-        if (payload.action === "PREPARE_VALIDATION") {
+        if (payload.action === "PREPARE_VALIDATION" || !payload.action) {
           const pkg = await fetchPackageById(adminSub, payload.package_id);
           responseScreen = "Validation_Screen";
           responseData = {
