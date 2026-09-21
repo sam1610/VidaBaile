@@ -224,12 +224,21 @@ export const handler = async (event: any) => {
         // Date bounds are enforced by the DatePicker min-date/max-date on the client.
         if (payload.action === "PREPARE_VALIDATION" || !payload.action) {
           const pkg = await fetchPackageById(adminSub, payload.package_id);
+          const pkgTitle = pkg?.packageType?.S || pkg?.name?.S || "Package";
+          // Map time IDs to display labels
+          const timeLabels: Record<string, string> = {
+            "18:00": "6:00 PM", "19:00": "7:00 PM",
+            "20:00": "8:00 PM", "21:00": "9:00 PM"
+          };
+          const timeDisplay = timeLabels[payload.time] ?? payload.time;
+          // Compose summary server-side — avoids client-side variable interpolation issues
+          const summary = `📋 *Package:* ${pkgTitle}\n📅 *Date:* ${payload.date}\n⏰ *Time:* ${timeDisplay}`;
           responseScreen = "Validation_Screen";
           responseData = {
-            package_id:    payload.package_id,
-            package_title: pkg?.packageType?.S || pkg?.name?.S || "Package",
-            date:          payload.date,
-            time:          payload.time,
+            package_id: payload.package_id,
+            date:       payload.date,
+            time:       payload.time,
+            summary,
           };
         } else {
           const selectedDateStr: string = payload.date; // YYYY-MM-DD

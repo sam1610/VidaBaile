@@ -119,10 +119,10 @@
                 "on-click-action": {
                   "name": "data_exchange",
                   "payload": {
-                    "action":     "PREPARE_VALIDATION",
+                    "action": "PREPARE_VALIDATION",
                     "package_id": "${data.package_id}",
-                    "date":       "${form.booking_date}",
-                    "time":       "${form.booking_time}"
+                    "date": "${form.booking_date}",
+                    "time": "${form.booking_time}"
                   }
                 }
               }
@@ -135,55 +135,53 @@
       "id": "Validation_Screen",
       "title": "Confirm Booking",
       "data": {
-        "package_id":    { "type": "string", "__example__": "tango" },
-        "package_title": { "type": "string", "__example__": "Tango Season" },
-        "date":          { "type": "string", "__example__": "2026-10-01" },
-        "time":          { "type": "string", "__example__": "18:00" }
+        "package_id": { "type": "string", "__example__": "tango" },
+        "date":        { "type": "string", "__example__": "2026-10-01" },
+        "time":        { "type": "string", "__example__": "18:00" },
+        "summary":     { "type": "string", "__example__": "📋 Package: Tango Season\n📅 Date: 2026-10-01\n⏰ Time: 6:00 PM" }
       },
       "terminal": false,
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
-          { "type": "TextHeading", "text": "Review Your Booking" },
-          { "type": "TextBody", "text": "Package: ${data.package_title}" },
-          { "type": "TextBody", "text": "Date: ${data.date}" },
-          { "type": "TextBody", "text": "Time: ${data.time}" },
           {
-            "type": "Footer",
-            "label": "Confirm & Book",
-            "on-click-action": {
-              "name": "data_exchange",
-              "payload": {
-                "action": "FINALIZE_SUBMISSION",
-                "package_id": "${data.package_id}",
-                "date":        "${data.date}",
-                "time":        "${data.time}"
+            "type": "Form",
+            "name": "confirm_form",
+            "children": [
+              { "type": "TextHeading", "text": "Review Your Booking" },
+              { "type": "TextBody", "markdown": true, "text": "${data.summary}" },
+              {
+                "type": "Footer",
+                "label": "Confirm & Book",
+                "on-click-action": {
+                  "name": "data_exchange",
+                  "payload": {
+                    "action": "FINALIZE_SUBMISSION",
+                    "package_id": "${data.package_id}",
+                    "date": "${data.date}",
+                    "time": "${data.time}"
+                  }
+                }
               }
-            }
+            ]
           }
         ]
       }
     },
     {
       "id": "Terminal_Success",
-      "title": "Success",
+      "title": "Booking Confirmed",
       "terminal": true,
       "data": {},
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
           { "type": "TextHeading", "text": "🎉 Booking Confirmed!" },
-          {
-            "type": "TextBody",
-            "text": "Your package has been successfully booked. We will see you on the dance floor!"
-          },
+          { "type": "TextBody", "text": "Your package has been successfully booked. We will see you on the dance floor!" },
           {
             "type": "Footer",
             "label": "Close",
-            "on-click-action": {
-              "name": "complete",
-              "payload": {}
-            }
+            "on-click-action": { "name": "complete", "payload": {} }
           }
         ]
       }
