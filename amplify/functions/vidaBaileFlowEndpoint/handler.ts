@@ -1,4 +1,4 @@
-import { DynamoDBClient, QueryCommand, GetItemCommand, PutItemCommand } from "@aws-sdk/client-dynamodb";
+import { DynamoDBClient, QueryCommand, GetItemCommand, PutItemCommand, UpdateItemCommand } from "@aws-sdk/client-dynamodb";
 import * as crypto from "crypto";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
 import * as https from "https";
@@ -56,6 +56,14 @@ function resolveTenantSub(decryptedData: any): string {
     return process.env.DEFAULT_ADMIN_SUB;
   }
   throw new Error("Unauthorized Flow access: Missing tenant context.");
+}
+
+function resolveBroadcastId(decryptedData: any): string | null {
+  const token = decryptedData?.flow_token;
+  if (!token) return null;
+  // Format: BUY_PACKAGE_<packageId>_CAMP#<broadcastId>_ADMIN#<adminSub>
+  const campMatch = token.match(/_CAMP#([^_]+)_ADMIN#/);
+  return campMatch?.[1] ?? null;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -133,6 +141,24 @@ async function fetchActiveBroadcastByPackageId(
   });
   if (!match) return null;
   return { validFrom: match.validFrom?.S, validUntil: match.validUntil?.S };
+}
+
+async function findReceiptPhone(adminSub: string, broadcastId: string): Promise<string | null> {
+  // Query all BROADCAST#<id>#MEMBER#<phone> receipts for this broadcast
+  const res = await ddb.send(new QueryCommand({
+    TableName: TABLE_NAME,
+    KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+    ExpressionAttributeValues: {
+      ":pk":     { S: adminSub },
+      ":prefix": { S: `BROADCAST#${broadcastId}#MEMBER#` },
+    },
+    Limit: 1, // Flow is single-member context — take the first match
+  }));
+  const item = res.Items?.[0];
+  if (!item) return null;
+  // Extract phone from sk: BROADCAST#<id>#MEMBER#<phone>
+  const skParts = item.sk?.S?.split("#MEMBER#");
+  return skParts?.[1] ?? item.recipientPhone?.S ?? null;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -244,24 +270,38 @@ export const handler = async (event: any) => {
           }
         }
       }
-      else if (payload.action === "FINALIZE_SUBMISSION") {
-        const bookingId = crypto.randomUUID();
+      else if (payload.action === "FINALIZE_SUBMISSION" || 
+               (payload.package_id && payload.date && payload.time && payload.confirmed)) {
         const timestamp = new Date().toISOString();
 
-        await ddb.send(new PutItemCommand({
-          TableName: TABLE_NAME,
-          Item: {
-            pk: { S: adminSub }, 
-            sk: { S: `BOOKING#${bookingId}` },
-            gsi1pk: { S: `${adminSub}#BOOKINGS` }, 
-            gsi1sk: { S: `STATUS#CONFIRMED#${timestamp}` },
-            entityType: { S: "BOOKING" },
-            packageId: { S: payload.package_id || "UNKNOWN" },
-            bookingDate: { S: payload.date || "UNKNOWN" },
-            bookingTime: { S: payload.time || "UNKNOWN" },
-            createdAt: { S: timestamp }
+        // Resolve broadcast context from the flow_token
+        const broadcastId = resolveBroadcastId(decryptedData);
+        if (broadcastId) {
+          const recipientPhone = await findReceiptPhone(adminSub, broadcastId);
+          if (recipientPhone) {
+            const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
+            console.log(`✅ Confirming booking on receipt: ${receiptSk}`);
+            await ddb.send(new UpdateItemCommand({
+              TableName: TABLE_NAME,
+              Key: {
+                pk: { S: adminSub },
+                sk: { S: receiptSk },
+              },
+              UpdateExpression:
+                "SET memberBookingStatus = :status, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
+              ExpressionAttributeValues: {
+                ":status": { S: "BOOKED" },
+                ":date":   { S: payload.date   || "" },
+                ":time":   { S: payload.time   || "" },
+                ":ts":     { S: timestamp },
+              },
+            }));
+          } else {
+            console.error(`❌ No receipt found for broadcastId: ${broadcastId}`);
           }
-        }));
+        } else {
+          console.error(`❌ Could not parse broadcastId from flow_token: ${decryptedData?.flow_token}`);
+        }
 
         responseScreen = "Terminal_Success";
         responseData = {};
