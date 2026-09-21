@@ -203,15 +203,24 @@ export const handler = async (event: any) => {
       console.log(`🔄 data_exchange payload:`, JSON.stringify(payload));
       
       if (payload.action === "FETCH_PACKAGE_DETAILS" || (payload.package_id && !payload.action)) {
-        const pkg = await fetchPackageById(adminSub, payload.package_id);
+        const pkg      = await fetchPackageById(adminSub, payload.package_id);
+        const validity = await fetchActiveBroadcastByPackageId(adminSub, payload.package_id);
+        const today    = new Date().toISOString().split("T")[0];
         responseScreen = "Package_Details_Screen";
         responseData = {
-          package_id: payload.package_id, // State passthrough
-          package_title: pkg?.packageType?.S || pkg?.name?.S || "Unknown Package",
-          package_description: `Price: ${pkg?.price?.N || "0"} BHD. Includes exclusive sessions.`,
-          package_image_url: "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop", 
+          package_id:            payload.package_id,
+          package_title:         pkg?.packageType?.S || pkg?.name?.S || "Unknown Package",
+          package_description:   `Price: ${pkg?.price?.N || "0"} BHD. Includes exclusive sessions.`,
+          package_image_url:     "https://images.unsplash.com/photo-1547153760-18fc86324498?q=80&w=600&auto=format&fit=crop",
           is_time_error_visible: false,
-          time_error_msg: ""
+          time_error_msg:        "",
+          // DatePicker bounds — constrain selection to the broadcast validity window
+          valid_from:  validity?.validFrom  ?? today,
+          valid_until: validity?.validUntil ?? "2099-12-31",
+          // Pre-select today (or validFrom if today is before the window opens)
+          init_date:   (validity?.validFrom && validity.validFrom > today)
+                         ? validity.validFrom
+                         : today,
         };
       }
       else if (payload.action === "VALIDATE_BOOKING" || (payload.package_id && payload.date && payload.time && !payload.action)) {
