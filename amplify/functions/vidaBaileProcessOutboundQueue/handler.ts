@@ -20,6 +20,12 @@
  *   sk:     BROADCAST#<broadcastId>#MEMBER#<recipientPhone>
  *   gsi1pk: MSG#<wamid>   (for webhook delivery-status routing)
  *   gsi1sk: WEBHOOK
+ *
+ * Fallback behaviour (added in bugfix whatsapp-flow-immediate-delivery-failure):
+ *   If templateName === "promo_offer" and the interactive Flow send fails (non-200
+ *   or missing WAMID), the handler immediately retries with a plain-text message.
+ *   On success the BROADCAST_RECEIPT is written with deliveryStatus: "SENT_FALLBACK".
+ *   Only if the fallback itself also fails does the record enter batchItemFailures.
  */
 
 import { DynamoDBClient, PutItemCommand } from "@aws-sdk/client-dynamodb";
@@ -122,33 +128,80 @@ export const handler = async (event: any) => {
 
       console.log(`📤 Payload type: ${ (metaPayload as any).type } | FLOW_ID: ${FLOW_ID} | templateName: ${templateName}`);
 
+      let wamid: string | undefined;
+      let deliveryStatus = "SENT";
+
       // ── 4. Send via Meta WhatsApp Cloud API ──────────────────────────────
-      const response = await fetch(
-        `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
-        {
-          method:  "POST",
-          headers: {
-            Authorization:  `Bearer ${META_ACCESS_TOKEN}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify(metaPayload),
-        }
-      );
-
-      const metaData: any = await response.json();
-      if (!response.ok) {
-        // Log the full error body so error_data.details is visible in CloudWatch
-        console.error(`❌ Meta API full error:`, JSON.stringify(metaData));
-        throw new Error(
-          `Meta API error (${response.status}): ${metaData.error?.message ?? JSON.stringify(metaData)}`
+      try {
+        const response = await fetch(
+          `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
+          {
+            method:  "POST",
+            headers: {
+              Authorization:  `Bearer ${META_ACCESS_TOKEN}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify(metaPayload),
+          }
         );
-      }
 
-      const wamid: string | undefined = metaData.messages?.[0]?.id;
-      if (!wamid) {
-        throw new Error("Meta API returned success but no message ID in response");
+        const metaData: any = await response.json();
+        if (!response.ok) {
+          // Log the full error body so error_data.details is visible in CloudWatch
+          console.error(`❌ Meta API full error:`, JSON.stringify(metaData));
+          throw new Error(
+            `Meta API error (${response.status}): ${metaData.error?.message ?? JSON.stringify(metaData)}`
+          );
+        }
+
+        wamid = metaData.messages?.[0]?.id;
+        if (!wamid) {
+          throw new Error("Meta API returned success but no message ID in response");
+        }
+        console.log(`✅ Sent to ${recipientPhone} (WAMID: ${wamid})`);
+
+      } catch (primaryError: any) {
+        // ── 4b. Plain-text fallback — runs only for promo_offer when Flow fails ──
+        // This ensures recipients still receive a message even if the Flow
+        // infrastructure is broken (stale URL, DRAFT mode, RSA key mismatch, etc.)
+        if (templateName === "promo_offer") {
+          console.warn(`⚠️ Flow message failed (${primaryError.message}), retrying as plain-text for ${recipientPhone}`);
+          const fallbackPayload = {
+            messaging_product: "whatsapp",
+            recipient_type:    "individual",
+            to:                targetNumber,
+            type:              "text",
+            text: { body: promotionalContent || "Hello from VidaBaile!" },
+          };
+          const fallbackResponse = await fetch(
+            `https://graph.facebook.com/v20.0/${PHONE_NUMBER_ID}/messages`,
+            {
+              method:  "POST",
+              headers: {
+                Authorization:  `Bearer ${META_ACCESS_TOKEN}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify(fallbackPayload),
+            }
+          );
+          const fallbackData: any = await fallbackResponse.json();
+          if (!fallbackResponse.ok) {
+            console.error(`❌ Fallback also failed:`, JSON.stringify(fallbackData));
+            throw new Error(
+              `Fallback plain-text failed (${fallbackResponse.status}): ${fallbackData.error?.message}`
+            );
+          }
+          wamid = fallbackData.messages?.[0]?.id;
+          if (!wamid) {
+            throw new Error("Fallback succeeded but returned no WAMID");
+          }
+          deliveryStatus = "SENT_FALLBACK";
+          console.log(`✅ Fallback sent to ${recipientPhone} (WAMID: ${wamid})`);
+        } else {
+          // Non-promo: re-throw unchanged so SQS retries the record
+          throw primaryError;
+        }
       }
-      console.log(`✅ Sent to ${recipientPhone} (WAMID: ${wamid})`);
 
       // ── 5. Create BROADCAST_RECEIPT ledger record ────────────────────────
       // recipientPhone stored with '+' so webhook reverse-lookup matches exactly.
@@ -165,7 +218,7 @@ export const handler = async (event: any) => {
             entityType:        { S: "BROADCAST_RECEIPT" },
             gsi1pk:            { S: `MSG#${wamid}` },
             gsi1sk:            { S: "WEBHOOK" },
-            deliveryStatus:    { S: "SENT" },
+            deliveryStatus:    { S: deliveryStatus },
             hasReplied:        { BOOL: false },
             whatsappMessageId: { S: wamid },
             recipientPhone:    { S: recipientPhone },

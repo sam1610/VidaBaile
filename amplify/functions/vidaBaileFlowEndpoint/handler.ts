@@ -170,6 +170,9 @@ async function findReceiptPhone(adminSub: string, broadcastId: string): Promise<
 export const handler = async (event: any) => {
   console.log("🌊 Flow Endpoint Triggered");
 
+  let decryptedAction: string | undefined;
+  let body: any;
+
   try {
     const rawKey = process.env.FLOW_PRIVATE_KEY || "";
     const PRIVATE_KEY = rawKey.replace(/\\n/g, '\n');
@@ -177,9 +180,27 @@ export const handler = async (event: any) => {
 
     let bodyStr = event.body || "{}";
     if (event.isBase64Encoded) bodyStr = Buffer.from(bodyStr, "base64").toString("utf8");
-    const body = JSON.parse(bodyStr);
+    body = JSON.parse(bodyStr);
 
-    const { aesKey, iv, data: decryptedData } = decryptMetaRequest(body, PRIVATE_KEY);
+    let aesKey: Buffer, iv: Buffer, decryptedData: any;
+    try {
+      ({ aesKey, iv, data: decryptedData } = decryptMetaRequest(body, PRIVATE_KEY));
+      decryptedAction = decryptedData.action;
+    } catch (cryptoErr: any) {
+      const isCryptoError =
+        cryptoErr.message?.includes("RSA") ||
+        cryptoErr.message?.includes("decrypt") ||
+        cryptoErr.code === "ERR_OSSL_RSA_PKCS_DECRYPTION_ERROR";
+      console.error("❌ Decryption failed:", {
+        errorMessage: cryptoErr.message,
+        likelyCause: isCryptoError
+          ? "RSA key mismatch — check FLOW_PRIVATE_KEY secret matches Meta Flow public key"
+          : "Malformed payload",
+        encryptedFieldsPresent: ["encrypted_aes_key", "encrypted_flow_data", "initial_vector"]
+          .filter(k => body && k in body),
+      });
+      throw cryptoErr;
+    }
     console.log("🔓 Decrypted payload action:", decryptedData.action);
 
     if (decryptedData.action === "ping") {
@@ -192,7 +213,9 @@ export const handler = async (event: any) => {
     
     // ── ROUTING STATE MACHINE ──
     if (decryptedData.action === "INIT") {
+      const t0 = Date.now();
       const activePackages = await fetchActivePackages(adminSub);
+      console.log(`⏱️ fetchActivePackages: ${Date.now() - t0}ms, found ${activePackages.length} packages`);
       console.log(`📦 Found ${activePackages.length} packages for Admin: ${adminSub}`);
 
       responseScreen = "Packages_Screen";
@@ -355,7 +378,12 @@ export const handler = async (event: any) => {
     };
 
   } catch (err: any) {
-    console.error("❌ Flow execution error:", err);
+    console.error("❌ Flow execution error:", {
+      message: err.message,
+      stack:   err.stack,
+      action:  decryptedAction ?? "UNKNOWN (decryption failed)",
+      encryptedFieldsPresent: body ? Object.keys(body) : [],
+    });
     return { statusCode: 500, body: "Internal Server Error" };
   }
 };

@@ -1,0 +1,226 @@
+{
+  "pbtResults": {
+    "1. Write bug condition exploration test (Property 1 — BEFORE fix)": {
+      "status": "passed",
+      "failingExample": "Counterexample confirmed on unfixed code: promo_offer record with Flow 400 response (flow_is_not_published) enters batchItemFailures with itemIdentifier='msg-001'. No PutItemCommand called — BROADCAST_RECEIPT never written. Zero delivery confirmed.",
+      "lastRunTimestamp": 1790077645335
+    },
+    "2. Write preservation baseline tests (Properties 2 & 3 — BEFORE fix)": {
+      "status": "passed",
+      "lastRunTimestamp": 1790077650452
+    }
+  },
+  "executionHistory": {
+    "1. Write bug condition exploration test (Property 1 — BEFORE fix)": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076140
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077086233
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077677356
+      }
+    ],
+    "2. Write preservation baseline tests (Properties 2 & 3 — BEFORE fix)": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076205
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077086461
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077678090
+      }
+    ],
+    "3. Apply fix to vidaBaileProcessOutboundQueue/handler.ts — DEPLOY IMMEDIATELY": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076270
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077683153
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078164159
+      }
+    ],
+    "4. Apply diagnostic improvements to vidaBaileFlowEndpoint/handler.ts": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076306
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078169097
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078269542
+      }
+    ],
+    "5.1 Re-run Property 1 exploration test — now MUST PASS": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076358
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078275250
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078778425
+      }
+    ],
+    "5.2 Unit test — fallback WAMID is correctly stored in gsi1pk": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076463
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078276111
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078779286
+      }
+    ],
+    "5.3 Unit test — double failure routes to batchItemFailures": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076503
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078277161
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078779935
+      }
+    ],
+    "5.4 Unit test — batch isolation: fallback failure on one record does not affect others": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076539
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078277879
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078780533
+      }
+    ],
+    "5.5 Unit test — FlowEndpoint decryption error log structure": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076574
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078278701
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078781179
+      }
+    ],
+    "5.6 Unit test — FlowEndpoint RSA key mismatch detected": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076617
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078279315
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078782054
+      }
+    ],
+    "6. Re-run preservation tests (Properties 2 & 3) — MUST still PASS": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076677
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078787204
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078799983
+      }
+    ],
+    "7. Checkpoint — All tests green + TypeScript clean + deployment verified": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790077076704
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078804600
+      },
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078816195
+      }
+    ],
+    "5. Verify fix with fix-checking tests (Property 1 re-run + new unit tests)": [
+      {
+        "executionId": "20de1abd-f75d-40b9-8959-0eba768d0504",
+        "chatSessionId": "sess_0da63c9c-3f85-4e33-8375-d707286a1c19",
+        "timestamp": 1790078782105
+      }
+    ]
+  }
+}
