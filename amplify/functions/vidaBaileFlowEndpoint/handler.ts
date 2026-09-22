@@ -228,7 +228,46 @@ export const handler = async (event: any) => {
       const payload = decryptedData.data;
       console.log(`🔄 data_exchange payload:`, JSON.stringify(payload));
       
-      if (payload.action === "FETCH_PACKAGE_DETAILS" || (payload.package_id && !payload.date && !payload.time && !payload.action)) {
+      // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
+      if (payload.action === "FINALIZE_SUBMISSION" ||
+          (payload.package_id && payload.date && payload.time && payload.confirmed)) {
+        console.log(`🎯 FINALIZE_SUBMISSION: package=${payload.package_id}, date=${payload.date}, time=${payload.time}`);
+        const timestamp = new Date().toISOString();
+
+        // Resolve broadcast context from the flow_token
+        const broadcastId = resolveBroadcastId(decryptedData);
+        if (broadcastId) {
+          const recipientPhone = await findReceiptPhone(adminSub, broadcastId);
+          if (recipientPhone) {
+            const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
+            console.log(`✅ Confirming booking on receipt: ${receiptSk}`);
+            await ddb.send(new UpdateItemCommand({
+              TableName: TABLE_NAME,
+              Key: {
+                pk: { S: adminSub },
+                sk: { S: receiptSk },
+              },
+              UpdateExpression:
+                "SET memberBookingStatus = :status, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
+              ExpressionAttributeValues: {
+                ":status": { S: "BOOKED" },
+                ":date":   { S: payload.date   || "" },
+                ":time":   { S: payload.time   || "" },
+                ":ts":     { S: timestamp },
+              },
+            }));
+          } else {
+            console.error(`❌ No receipt found for broadcastId: ${broadcastId}`);
+          }
+        } else {
+          console.error(`❌ Could not parse broadcastId from flow_token: ${decryptedData?.flow_token}`);
+        }
+
+        responseScreen = "Terminal_Success";
+        responseData = {};
+      }
+      // ── 2. FETCH_PACKAGE_DETAILS ─────────────────────────────────────────────────
+      else if (payload.action === "FETCH_PACKAGE_DETAILS" || (payload.package_id && !payload.date && !payload.time && !payload.action)) {
         // package_id may be "<broadcastId>|<catalogPackageId>" — split to get catalog id
         const parts       = (payload.package_id as string).split("|");
         const catalogId   = parts.length === 2 ? parts[1] : parts[0];
@@ -248,6 +287,7 @@ export const handler = async (event: any) => {
           valid_until: validity?.validUntil ?? "2099-12-31",
         };
       }
+      // ── 3. PREPARE_VALIDATION / VALIDATE_BOOKING ─────────────────────────────────
       else if (payload.action === "PREPARE_VALIDATION" || payload.action === "VALIDATE_BOOKING" || (payload.package_id && payload.date && payload.time && !payload.action)) {
         // PREPARE_VALIDATION: skip server-side validation, go directly to confirm screen
         // Date bounds are enforced by the DatePicker min-date/max-date on the client.
@@ -326,42 +366,7 @@ export const handler = async (event: any) => {
           }
         }
       }
-      else if (payload.action === "FINALIZE_SUBMISSION" || 
-               (payload.package_id && payload.date && payload.time && payload.confirmed)) {
-        const timestamp = new Date().toISOString();
-
-        // Resolve broadcast context from the flow_token
-        const broadcastId = resolveBroadcastId(decryptedData);
-        if (broadcastId) {
-          const recipientPhone = await findReceiptPhone(adminSub, broadcastId);
-          if (recipientPhone) {
-            const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
-            console.log(`✅ Confirming booking on receipt: ${receiptSk}`);
-            await ddb.send(new UpdateItemCommand({
-              TableName: TABLE_NAME,
-              Key: {
-                pk: { S: adminSub },
-                sk: { S: receiptSk },
-              },
-              UpdateExpression:
-                "SET memberBookingStatus = :status, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
-              ExpressionAttributeValues: {
-                ":status": { S: "BOOKED" },
-                ":date":   { S: payload.date   || "" },
-                ":time":   { S: payload.time   || "" },
-                ":ts":     { S: timestamp },
-              },
-            }));
-          } else {
-            console.error(`❌ No receipt found for broadcastId: ${broadcastId}`);
-          }
-        } else {
-          console.error(`❌ Could not parse broadcastId from flow_token: ${decryptedData?.flow_token}`);
-        }
-
-        responseScreen = "Terminal_Success";
-        responseData = {};
-      }
+      // ── 4. Unknown action fallback ───────────────────────────────────────────────
       else {
         // Unknown action — log it so we can diagnose unexpected payloads
         console.error(`❌ Unknown data_exchange action: ${payload?.action}. Full payload:`, JSON.stringify(payload));
