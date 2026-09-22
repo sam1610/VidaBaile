@@ -2,9 +2,15 @@
   "version": "7.3",
   "data_api_version": "3.0",
   "routing_model": {
-    "Packages_Screen": ["Package_Details_Screen"],
-    "Package_Details_Screen": ["Validation_Screen"],
-    "Validation_Screen": ["Terminal_Success"],
+    "Packages_Screen": [
+      "Package_Details_Screen"
+    ],
+    "Package_Details_Screen": [
+      "Validation_Screen"
+    ],
+    "Validation_Screen": [
+      "Terminal_Success"
+    ],
     "Terminal_Success": []
   },
   "screens": [
@@ -17,14 +23,28 @@
           "items": {
             "type": "object",
             "properties": {
-              "id": { "type": "string" },
-              "title": { "type": "string" },
-              "description": { "type": "string" }
+              "id": {
+                "type": "string"
+              },
+              "title": {
+                "type": "string"
+              },
+              "description": {
+                "type": "string"
+              }
             }
           },
           "__example__": [
-            { "id": "tango", "title": "Tango Season", "description": "8-week intensive." },
-            { "id": "salsa", "title": "Salsa Basics", "description": "Beginner friendly." }
+            {
+              "id": "tango",
+              "title": "Tango Season",
+              "description": "8-week intensive."
+            },
+            {
+              "id": "salsa",
+              "title": "Salsa Basics",
+              "description": "Beginner friendly."
+            }
           ]
         }
       },
@@ -63,14 +83,40 @@
       "id": "Package_Details_Screen",
       "title": "Package Details",
       "data": {
-        "package_id":            { "type": "string",  "__example__": "tango" },
-        "package_title":         { "type": "string",  "__example__": "Tango Season" },
-        "package_description":   { "type": "string",  "__example__": "8-week intensive..." },
-        "package_image_url":     { "type": "string",  "__example__": "https://example.com/image.jpg" },
-        "is_time_error_visible": { "type": "boolean", "default": false, "__example__": false },
-        "time_error_msg":        { "type": "string",  "default": "", "__example__": "Time invalid." },
-        "valid_from":            { "type": "string",  "__example__": "2026-09-21" },
-        "valid_until":           { "type": "string",  "__example__": "2026-12-31" }
+        "package_id": {
+          "type": "string",
+          "__example__": "tango"
+        },
+        "package_title": {
+          "type": "string",
+          "__example__": "Tango Season"
+        },
+        "package_description": {
+          "type": "string",
+          "__example__": "8-week intensive..."
+        },
+        "package_image_url": {
+          "type": "string",
+          "__example__": "https://example.com/image.jpg"
+        },
+        "is_time_error_visible": {
+          "type": "boolean",
+          "default": false,
+          "__example__": false
+        },
+        "time_error_msg": {
+          "type": "string",
+          "default": "",
+          "__example__": "Time invalid."
+        },
+        "valid_from": {
+          "type": "string",
+          "__example__": "2026-09-21"
+        },
+        "valid_until": {
+          "type": "string",
+          "__example__": "2026-12-31"
+        }
       },
       "terminal": false,
       "layout": {
@@ -82,8 +128,14 @@
             "height": 200,
             "scale-type": "cover"
           },
-          { "type": "TextHeading", "text": "${data.package_title}" },
-          { "type": "TextBody",    "text": "${data.package_description}" },
+          {
+            "type": "TextHeading",
+            "text": "${data.package_title}"
+          },
+          {
+            "type": "TextBody",
+            "text": "${data.package_description}"
+          },
           {
             "type": "Form",
             "name": "booking_form",
@@ -107,10 +159,22 @@
                 "label": "Select Time",
                 "required": true,
                 "data-source": [
-                  { "id": "18:00", "title": "6:00 PM" },
-                  { "id": "19:00", "title": "7:00 PM" },
-                  { "id": "20:00", "title": "8:00 PM" },
-                  { "id": "21:00", "title": "9:00 PM" }
+                  {
+                    "id": "18:00",
+                    "title": "6:00 PM"
+                  },
+                  {
+                    "id": "19:00",
+                    "title": "7:00 PM"
+                  },
+                  {
+                    "id": "20:00",
+                    "title": "8:00 PM"
+                  },
+                  {
+                    "id": "21:00",
+                    "title": "9:00 PM"
+                  }
                 ]
               },
               {
@@ -135,10 +199,22 @@
       "id": "Validation_Screen",
       "title": "Confirm Booking",
       "data": {
-        "package_id": { "type": "string", "__example__": "tango" },
-        "date":        { "type": "string", "__example__": "2026-10-01" },
-        "time":        { "type": "string", "__example__": "18:00" },
-        "summary":     { "type": "string", "__example__": "📋 Package: Tango Season\n📅 Date: 2026-10-01\n⏰ Time: 6:00 PM" }
+        "package_id": {
+          "type": "string",
+          "__example__": "tango"
+        },
+        "date": {
+          "type": "string",
+          "__example__": "2026-10-01"
+        },
+        "time": {
+          "type": "string",
+          "__example__": "18:00"
+        },
+        "summary": {
+          "type": "string",
+          "__example__": "📋 Package: Tango Season\n📅 Date: 2026-10-01\n⏰ Time: 6:00 PM"
+        }
       },
       "terminal": false,
       "layout": {
@@ -148,8 +224,15 @@
             "type": "Form",
             "name": "confirm_form",
             "children": [
-              { "type": "TextHeading", "text": "Review Your Booking" },
-              { "type": "TextBody", "markdown": true, "text": "${data.summary}" },
+              {
+                "type": "TextHeading",
+                "text": "Review Your Booking"
+              },
+              {
+                "type": "TextBody",
+                "markdown": true,
+                "text": "${data.summary}"
+              },
               {
                 "type": "Footer",
                 "label": "Confirm & Book",
@@ -165,7 +248,8 @@
               }
             ]
           }
-        ]
+        ],
+        "has-back-button": false
       }
     },
     {
@@ -176,14 +260,24 @@
       "layout": {
         "type": "SingleColumnLayout",
         "children": [
-          { "type": "TextHeading", "text": "🎉 Booking Confirmed!" },
-          { "type": "TextBody", "text": "Your package has been successfully booked. We will see you on the dance floor!" },
+          {
+            "type": "TextHeading",
+            "text": "🎉 Booking Confirmed!"
+          },
+          {
+            "type": "TextBody",
+            "text": "Your package has been successfully booked. We will see you on the dance floor!"
+          },
           {
             "type": "Footer",
             "label": "Close",
-            "on-click-action": { "name": "complete", "payload": {} }
+            "on-click-action": {
+              "name": "complete",
+              "payload": {}
+            }
           }
-        ]
+        ],
+        "has-back-button": false
       }
     }
   ]

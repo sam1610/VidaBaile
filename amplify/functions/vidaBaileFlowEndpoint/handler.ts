@@ -234,35 +234,40 @@ export const handler = async (event: any) => {
         console.log(`🎯 FINALIZE_SUBMISSION: package=${payload.package_id}, date=${payload.date}, time=${payload.time}`);
         const timestamp = new Date().toISOString();
 
-        // Resolve broadcast context from the flow_token
-        const broadcastId = resolveBroadcastId(decryptedData);
-        if (broadcastId) {
-          const recipientPhone = await findReceiptPhone(adminSub, broadcastId);
-          if (recipientPhone) {
-            const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
-            console.log(`✅ Confirming booking on receipt: ${receiptSk}`);
-            await ddb.send(new UpdateItemCommand({
-              TableName: TABLE_NAME,
-              Key: {
-                pk: { S: adminSub },
-                sk: { S: receiptSk },
-              },
-              UpdateExpression:
-                "SET memberBookingStatus = :status, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
-              ExpressionAttributeValues: {
-                ":status": { S: "BOOKED" },
-                ":date":   { S: payload.date   || "" },
-                ":time":   { S: payload.time   || "" },
-                ":ts":     { S: timestamp },
-              },
-            }));
+        // ── Persist booking record — wrapped so a DynamoDB failure NEVER blocks Terminal_Success ──
+        try {
+          const broadcastId = resolveBroadcastId(decryptedData);
+          if (broadcastId) {
+            const recipientPhone = await findReceiptPhone(adminSub, broadcastId);
+            if (recipientPhone) {
+              const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
+              console.log(`✅ Confirming booking on receipt: ${receiptSk}`);
+              await ddb.send(new UpdateItemCommand({
+                TableName: TABLE_NAME,
+                Key: { pk: { S: adminSub }, sk: { S: receiptSk } },
+                UpdateExpression:
+                  "SET memberBookingStatus = :status, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
+                ExpressionAttributeValues: {
+                  ":status": { S: "BOOKED" },
+                  ":date":   { S: payload.date   || "" },
+                  ":time":   { S: payload.time   || "" },
+                  ":ts":     { S: timestamp },
+                },
+              }));
+              console.log(`📝 Booking persisted for ${recipientPhone}`);
+            } else {
+              console.warn(`⚠️ No receipt found for broadcastId: ${broadcastId} — Terminal_Success still shown`);
+            }
           } else {
-            console.error(`❌ No receipt found for broadcastId: ${broadcastId}`);
+            console.warn(`⚠️ Could not parse broadcastId from flow_token: ${decryptedData?.flow_token} — Terminal_Success still shown`);
           }
-        } else {
-          console.error(`❌ Could not parse broadcastId from flow_token: ${decryptedData?.flow_token}`);
+        } catch (dbErr: any) {
+          // Non-blocking: log the persistence failure but always show Terminal_Success to the user.
+          // The booking can be reconciled later via CloudWatch logs.
+          console.error(`❌ FINALIZE_SUBMISSION DynamoDB write failed (non-blocking): ${dbErr.message}`);
         }
 
+        // Always navigate to Terminal_Success — DynamoDB failure above must not block this
         responseScreen = "Terminal_Success";
         responseData = {};
       }
