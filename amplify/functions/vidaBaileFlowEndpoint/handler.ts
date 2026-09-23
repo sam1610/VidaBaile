@@ -62,7 +62,7 @@ function resolveBroadcastId(decryptedData: any): string | null {
   const token = decryptedData?.flow_token;
   if (!token) return null;
   // Format: BUY_PACKAGE_<packageId>_CAMP#<broadcastId>_ADMIN#<adminSub>
-  const campMatch = token.match(/_CAMP#([^_]+)_ADMIN#/);
+  const campMatch = token.match(/_CAMP#(.+?)_ADMIN#/);
   return campMatch?.[1] ?? null;
 }
 
@@ -228,9 +228,15 @@ export const handler = async (event: any) => {
       const payload = decryptedData.data;
       console.log(`🔄 data_exchange payload:`, JSON.stringify(payload));
       
+      // ── 0. Meta routing error notification — log and return Packages_Screen gracefully ──
+      if (payload.error === "invalid-screen-transition") {
+        console.error(`❌ Meta routing error: ${payload.error_message}`);
+        const activePackages = await fetchActivePackages(adminSub);
+        responseScreen = "Packages_Screen";
+        responseData = { packages_list: activePackages };
+      }
       // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
-      if (payload.action === "FINALIZE_SUBMISSION" ||
-          (payload.package_id && payload.date && payload.time && !payload.action)) {
+      else if (payload.action === "FINALIZE_SUBMISSION") {
         console.log(`🎯 FINALIZE_SUBMISSION: package=${payload.package_id}, date=${payload.date}, time=${payload.time}`);
         const timestamp = new Date().toISOString();
 
@@ -293,7 +299,8 @@ export const handler = async (event: any) => {
         };
       }
       // ── 3. PREPARE_VALIDATION / VALIDATE_BOOKING ─────────────────────────────────
-      else if (payload.action === "PREPARE_VALIDATION" || payload.action === "VALIDATE_BOOKING") {
+      else if (payload.action === "PREPARE_VALIDATION" || payload.action === "VALIDATE_BOOKING" ||
+               (payload.package_id && payload.date && payload.time && !payload.action)) {
         // PREPARE_VALIDATION: skip server-side validation, go directly to confirm screen
         // Date bounds are enforced by the DatePicker min-date/max-date on the client.
         if (payload.action === "PREPARE_VALIDATION" || !payload.action) {
