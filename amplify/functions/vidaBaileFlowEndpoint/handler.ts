@@ -230,7 +230,7 @@ export const handler = async (event: any) => {
       
       // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
       if (payload.action === "FINALIZE_SUBMISSION" ||
-          (payload.package_id && payload.date && payload.time && payload.confirmed)) {
+          (payload.package_id && payload.date && payload.time && !payload.action)) {
         console.log(`🎯 FINALIZE_SUBMISSION: package=${payload.package_id}, date=${payload.date}, time=${payload.time}`);
         const timestamp = new Date().toISOString();
 
@@ -293,7 +293,7 @@ export const handler = async (event: any) => {
         };
       }
       // ── 3. PREPARE_VALIDATION / VALIDATE_BOOKING ─────────────────────────────────
-      else if (payload.action === "PREPARE_VALIDATION" || payload.action === "VALIDATE_BOOKING" || (payload.package_id && payload.date && payload.time && !payload.action)) {
+      else if (payload.action === "PREPARE_VALIDATION" || payload.action === "VALIDATE_BOOKING") {
         // PREPARE_VALIDATION: skip server-side validation, go directly to confirm screen
         // Date bounds are enforced by the DatePicker min-date/max-date on the client.
         if (payload.action === "PREPARE_VALIDATION" || !payload.action) {
