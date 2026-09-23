@@ -39,8 +39,8 @@ async function findBroadcastReceiptByWamid(wamid: string) {
       IndexName: "clubRecordsByGsi1pkAndGsi1sk",
       KeyConditionExpression: "gsi1pk = :gsi1pk AND gsi1sk = :gsi1sk",
       ExpressionAttributeValues: {
-        ":gsi1pk": { S: "BROADCAST_RECEIPT" },
-        ":gsi1sk": { S: `WAMID#${wamid}` }
+        ":gsi1pk": { S: `MSG#${wamid}` },
+        ":gsi1sk": { S: "WEBHOOK" }
       }
     }));
     const item = res.Items?.[0];
@@ -280,7 +280,7 @@ export const handler = async (event: any) => {
           }));
 
           if (profileQuery.Items && profileQuery.Items.length > 0) {
-            let adminSub = profileQuery.Items[0].pk?.S;
+            adminSub = profileQuery.Items[0].pk?.S ?? "";
             console.log(`🎯 Tier 2 resolved via WhatsApp Number: ${adminSub}`);
           }
         }

@@ -221,35 +221,28 @@
         "type": "SingleColumnLayout",
         "children": [
           {
-            "type": "Form",
-            "name": "confirm_form",
-            "children": [
-              {
-                "type": "TextHeading",
-                "text": "Review Your Booking"
-              },
-              {
-                "type": "TextBody",
-                "markdown": true,
-                "text": "${data.summary}"
-              },
-              {
-                "type": "Footer",
-                "label": "Confirm & Book",
-                "on-click-action": {
-                  "name": "data_exchange",
-                  "payload": {
-                    "action": "FINALIZE_SUBMISSION",
-                    "package_id": "${data.package_id}",
-                    "date": "${data.date}",
-                    "time": "${data.time}"
-                  }
-                }
+            "type": "TextHeading",
+            "text": "Review Your Booking"
+          },
+          {
+            "type": "TextBody",
+            "markdown": true,
+            "text": "${data.summary}"
+          },
+          {
+            "type": "Footer",
+            "label": "Confirm & Book",
+            "on-click-action": {
+              "name": "data_exchange",
+              "payload": {
+                "action": "FINALIZE_SUBMISSION",
+                "package_id": "${data.package_id}",
+                "date": "${data.date}",
+                "time": "${data.time}"
               }
-            ]
+            }
           }
-        ],
-        "has-back-button": false
+        ]
       }
     },
     {
@@ -276,8 +269,7 @@
               "payload": {}
             }
           }
-        ],
-        "has-back-button": false
+        ]
       }
     }
   ]
