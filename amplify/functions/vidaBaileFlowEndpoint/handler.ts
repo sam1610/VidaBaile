@@ -236,7 +236,7 @@ export const handler = async (event: any) => {
         responseData = { packages_list: activePackages };
       }
       // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
-      else if (payload.action === "FINALIZE_SUBMISSION") {
+      else if (payload.action === "FINALIZE_SUBMISSION" || payload.consent_given) {
         console.log(`🎯 FINALIZE_SUBMISSION: package=${payload.package_id}, date=${payload.date}, time=${payload.time}`);
         const timestamp = new Date().toISOString();
 
