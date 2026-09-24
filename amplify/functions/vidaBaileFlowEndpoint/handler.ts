@@ -252,9 +252,10 @@ export const handler = async (event: any) => {
                 TableName: TABLE_NAME,
                 Key: { pk: { S: adminSub }, sk: { S: receiptSk } },
                 UpdateExpression:
-                  "SET memberBookingStatus = :status, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
+                  "SET memberBookingStatus = :status, packageId = :pkgId, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
                 ExpressionAttributeValues: {
                   ":status": { S: "BOOKED" },
+                  ":pkgId":  { S: payload.package_id || "UNKNOWN" },
                   ":date":   { S: payload.date   || "" },
                   ":time":   { S: payload.time   || "" },
                   ":ts":     { S: timestamp },
