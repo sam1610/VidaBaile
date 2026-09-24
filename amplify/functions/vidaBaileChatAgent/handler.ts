@@ -119,6 +119,7 @@ async function getKnowledgeBase(
 ): Promise<string> {
   console.log(`🔍 KB Lookup | campaignId: \({campaignId || "NULL"} | phone:\){senderPhone}`);
 
+  // 1. Auto-recover campaignId if missing
   if (!campaignId) {
     try {
       const recentRes = await ddb.send(
@@ -170,6 +171,9 @@ async function getKnowledgeBase(
     }
   }
 
+  let combinedKb = "";
+
+  // 2. Fetch Campaign Context AND Package Context
   if (campaignId) {
     try {
       const broadcastRes = await ddb.send(
@@ -179,12 +183,13 @@ async function getKnowledgeBase(
         })
       );
 
-      const kb = broadcastRes.Item?.campaignKnowledgeBase?.S;
-      if (kb) {
+      const campaignKb = broadcastRes.Item?.campaignKnowledgeBase?.S;
+      if (campaignKb) {
         console.log(`📚 Campaign KB loaded (${campaignId})`);
-        return kb;
+        combinedKb += `[CAMPAIGN INSTRUCTIONS]\n${campaignKb}\n\n`;
       }
 
+      // Deep-fetch the linked CATALOG package details
       const packageRef = broadcastRes.Item?.packageIntent?.S || broadcastRes.Item?.packageRef?.S;
       if (packageRef) {
         const catalogSk = packageRef.startsWith("CATALOG#") ? packageRef : `CATALOG#${packageRef}`;
@@ -194,10 +199,10 @@ async function getKnowledgeBase(
             Key: { pk: { S: adminSub }, sk: { S: catalogSk } },
           })
         );
-        const catalogKb = catalogRes.Item?.packageKnowledgeBase?.S;
-        if (catalogKb) {
+        const packageKb = catalogRes.Item?.packageKnowledgeBase?.S;
+        if (packageKb) {
           console.log(`📦 Catalog KB successfully loaded via ${catalogSk}`);
-          return catalogKb;
+          combinedKb += `[PACKAGE DETAILS]\n${packageKb}\n\n`;
         }
       }
     } catch (err: any) {
@@ -205,6 +210,7 @@ async function getKnowledgeBase(
     }
   }
 
+  // 3. Fallback to direct package fetch if no campaign was found
   if (!campaignId && packageIntent) {
     try {
       const res = await ddb.send(
@@ -213,14 +219,19 @@ async function getKnowledgeBase(
           Key: { pk: { S: adminSub }, sk: { S: `CATALOG#${packageIntent}` } },
         })
       );
-      const kb = res.Item?.packageKnowledgeBase?.S;
-      if (kb) {
+      const packageKb = res.Item?.packageKnowledgeBase?.S;
+      if (packageKb) {
         console.log(`📦 Package KB loaded directly (${packageIntent})`);
-        return kb;
+        combinedKb += `[PACKAGE DETAILS]\n${packageKb}\n\n`;
       }
     } catch (err: any) {
       console.warn(`⚠️ Package KB fetch error: ${err.message}`);
     }
+  }
+
+  // Return the combined knowledge base if anything was found
+  if (combinedKb.trim()) {
+    return combinedKb.trim();
   }
 
   console.log("ℹ️ No KB found — model will enforce boundary rule");
