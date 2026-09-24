@@ -53,10 +53,11 @@ async function findBroadcastReceiptByWamid(wamid: string) {
   }
 }
 
-async function updateBroadcastReceiptStatus(adminSub: string, sk: string, status: string, extraUpdates: Record = {}) {
+// FIXED: Record and exprVals variable name matching
+async function updateBroadcastReceiptStatus(adminSub: string, sk: string, status: string, extraUpdates: Record<string, any> = {}) {
   try {
     let updateExpr = "SET deliveryStatus = :status, updatedAt = :now";
-    const exprVals: Record = {
+    const exprVals: Record<string, any> = {
       ":status": { S: status },
       ":now": { S: new Date().toISOString() }
     };
@@ -151,7 +152,8 @@ export const handler = async (event: any) => {
 
       const receipt = await findBroadcastReceiptByWamid(wamid);
       if (receipt) {
-        const updates: Record = {};
+        // FIXED: Record
+        const updates: Record<string, any> = {};
         if (newStatus === "read") {
           updates.readAt = new Date().toISOString();
           updates.isRead = true;

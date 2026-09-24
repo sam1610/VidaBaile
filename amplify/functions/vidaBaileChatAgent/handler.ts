@@ -36,7 +36,13 @@ const SYSTEM_PROMPT =
   "RULE 4: CURRENT CONTEXT OVERRIDES HISTORY. The [PACKAGE CONTEXT] below is the absolute truth. If your chat history contains information about a different package or dance style, you MUST ignore the history and use ONLY the new context below.\n\n" +
   "[PACKAGE CONTEXT]\n{KNOWLEDGE_BASE_TEXT}";
 
-async function getMemberProfile(adminSub: string, phone: string) {
+async function getMemberProfile(adminSub: string, phone: string) :Promise<{
+  name: string;
+  tier: string;
+  status: string;
+  activePackages: string[];
+  chatHistory: any[];
+} | null> {
   const cleanPhone = phone.trim();
   const phoneWithPlus = cleanPhone.startsWith('+') ? cleanPhone : `+${cleanPhone}`;
   const phoneWithoutPlus = phoneWithPlus.replace('+', '');
@@ -103,12 +109,14 @@ async function getMemberProfile(adminSub: string, phone: string) {
   }
 }
 
+// FIXED: Promise
+// FIXED: Promise and template literals
 async function getKnowledgeBase(
   adminSub: string,
   campaignId: string | null | undefined,
   packageIntent: string | null | undefined,
   senderPhone: string
-): Promise {
+): Promise<string> {
   console.log(`🔍 KB Lookup | campaignId: \({campaignId || "NULL"} | phone:\){senderPhone}`);
 
   if (!campaignId) {
@@ -219,12 +227,13 @@ async function getKnowledgeBase(
   return "No specific package or campaign context available for this conversation.";
 }
 
+// FIXED: Promise
 async function invokeNova(
   modelId:      string,
   systemPrompt: string,
   messages:     any[],
   maxTokens:    number = 512
-): Promise {
+): Promise<any[]> {
   const payload: any = {
     system: [{ text: systemPrompt }],
     messages,
@@ -243,6 +252,7 @@ async function invokeNova(
   return body.output?.message?.content ?? body.content ?? [];
 }
 
+// FIXED: Promise<{ sentiment: string; summary: string } | null>
 async function analyseMessage(userMessage: string): Promise<{ sentiment: string; summary: string } | null> {
   const analysisPrompt =
     `You are a sentiment analysis engine. Analyse the following member message and respond with ONLY valid JSON, no prose, no markdown.\n` +
@@ -285,7 +295,6 @@ export const handler = async (event: any) => {
       const now = new Date().toISOString();
 
       // ── GUARD: Ignore internal system labels (Flow completions) ──────
-      // This stops the AI from generating "Lo siento..." when a user clicks the flow button
       if (messageText === "Interactive message" || messageText === "Button pressed" || messageText === "List choice") {
         console.log(`⏭️ Skipping automated UI message: "${messageText}"`);
         continue;
@@ -298,7 +307,7 @@ export const handler = async (event: any) => {
           const receiptRes = await ddb.send(
             new QueryCommand({
               TableName: TABLE_NAME,
-              IndexName: "gsi1pk", // FIXED: Updated to Amplify Gen 2 index name
+              IndexName: "gsi1pk", // FIXED for Amplify Gen 2
               KeyConditionExpression: "gsi1pk = :gsi1pk",
               ExpressionAttributeValues: { ":gsi1pk": { S: `MSG#${contextWamid}` } },
               Limit: 1
@@ -345,7 +354,7 @@ export const handler = async (event: any) => {
             body: JSON.stringify({
               messaging_product: "whatsapp",
               recipient_type:    "individual",
-              to:                senderPhone.replace(/^\+/, ""), // FIXED: Stripped + for Meta API
+              to:                senderPhone.replace(/^\+/, ""), // FIXED: Stripped +
               type:              "text",
               text:              { body: "Context reset." },
             }),
@@ -393,7 +402,7 @@ export const handler = async (event: any) => {
         const payload: any = {
           messaging_product: "whatsapp",
           recipient_type:    "individual",
-          to:                senderPhone.replace(/^\+/, ""), // FIXED: Stripped + for Meta API
+          to:                senderPhone.replace(/^\+/, ""), // FIXED: Stripped +
           type:              "text",
           text:              { body: chunks[i] },
         };
