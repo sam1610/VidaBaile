@@ -304,6 +304,7 @@ export const handler = async (event: any) => {
       } = msg;
 
       const now = new Date().toISOString();
+      console.log(`📩 chatAgent record | adminSub=${adminSub ?? "MISSING"} | senderPhone=${senderPhone} | campaignId=${campaignId ?? "none"} | contextWamid=${contextWamid ?? "none"} | msgLen=${messageText?.length ?? 0}`);
 
       // ── GUARD: Ignore internal system labels (Flow completions) ──────
       if (messageText === "Interactive message" || messageText === "Button pressed" || messageText === "List choice") {
@@ -318,7 +319,7 @@ export const handler = async (event: any) => {
           const receiptRes = await ddb.send(
             new QueryCommand({
               TableName: TABLE_NAME,
-              IndexName: "gsi1pk", // FIXED for Amplify Gen 2
+              IndexName: "clubRecordsByGsi1pkAndGsi1sk",
               KeyConditionExpression: "gsi1pk = :gsi1pk",
               ExpressionAttributeValues: { ":gsi1pk": { S: `MSG#${contextWamid}` } },
               Limit: 1
@@ -392,12 +393,14 @@ export const handler = async (event: any) => {
         { role: "user", content: [{ text: messageText }] },
       ];
 
+      console.log(`🧠 Invoking Bedrock (Nova Pro) | adminSub=${adminSub} | historyTurns=${messages.length - 1} | kbLen=${kbText.length}`);
       const responseBlocks = await invokeNova(
         MODEL_PRIMARY,
         systemPrompt,
         messages,
         1024
       );
+      console.log(`🧠 Bedrock returned ${responseBlocks.length} block(s)`);
 
       let assistantReply = "";
       for (const block of responseBlocks) {
@@ -419,6 +422,7 @@ export const handler = async (event: any) => {
         };
         if (contextWamid && i === 0) payload.context = { message_id: contextWamid };
 
+        console.log(`📲 WhatsApp send attempt | to=${payload.to} | chunk=${i+1}/${chunks.length} | phoneId=${WHATSAPP_PHONE_ID}`);
         const res = await fetch(
           `https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_ID}/messages`,
           {
@@ -432,9 +436,10 @@ export const handler = async (event: any) => {
         );
         if (!res.ok) {
           const err = await res.json();
-          console.error(`❌ WhatsApp send failed (chunk ${i}):`, err);
+          console.error(`❌ WhatsApp send failed (chunk ${i}) | to=${payload.to} | status=${res.status}:`, err);
           break;
         }
+        console.log(`✅ WhatsApp chunk ${i+1} sent`);
         if (i < chunks.length - 1) await sleep(1500);
       }
 

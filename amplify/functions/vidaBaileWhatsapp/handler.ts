@@ -31,10 +31,11 @@ function validateMetaSignature(body: string, signatureHeader?: string): boolean 
 }
 
 async function findBroadcastReceiptByWamid(wamid: string) {
+  console.log(`🔎 findBroadcastReceiptByWamid | wamid=${wamid} | table=${TABLE_NAME}`);
   try {
     const res = await ddb.send(new QueryCommand({
       TableName: TABLE_NAME,
-      IndexName: "gsi1pk", // FIXED for Amplify Gen 2
+      IndexName: "clubRecordsByGsi1pkAndGsi1sk",
       KeyConditionExpression: "gsi1pk = :gsi1pk AND gsi1sk = :gsi1sk",
       ExpressionAttributeValues: {
         ":gsi1pk": { S: `MSG#${wamid}` },
@@ -42,13 +43,18 @@ async function findBroadcastReceiptByWamid(wamid: string) {
       }
     }));
     const item = res.Items?.[0];
-    if (!item) return null;
+    if (!item) {
+      console.warn(`⚠️ findBroadcastReceiptByWamid | No receipt for wamid=${wamid} (${res.Items?.length ?? 0} items returned)`);
+      return null;
+    }
+    console.log(`✅ findBroadcastReceiptByWamid | Found receipt | adminSub=${item.pk?.S} | sk=${item.sk?.S}`);
     return {
       adminSub: item.pk?.S || "",
       sk: item.sk?.S || "",
       deliveryStatus: item.deliveryStatus?.S || ""
     };
-  } catch {
+  } catch (err: any) {
+    console.error(`❌ findBroadcastReceiptByWamid | DynamoDB error: ${err.message} | wamid=${wamid}`);
     return null;
   }
 }
@@ -90,7 +96,7 @@ async function resolveAdminFromDisplayPhone(displayPhone: string) {
   try {
     const res = await ddb.send(new QueryCommand({
       TableName: TABLE_NAME,
-      IndexName: "gsi1pk", // FIXED for Amplify Gen 2
+      IndexName: "clubRecordsByGsi1pkAndGsi1sk",
       KeyConditionExpression: "gsi1pk = :gsi1pk AND gsi1sk = :gsi1sk",
       ExpressionAttributeValues: {
         ":gsi1pk": { S: "WHATSAPP_MAPPING" },
@@ -261,7 +267,7 @@ export const handler = async (event: any) => {
           try {
             const profileQuery = await ddb.send(new QueryCommand({
               TableName: process.env.TABLE_NAME,
-              IndexName: "gsi1pk", // FIXED for Amplify Gen 2
+              IndexName: "clubRecordsByGsi1pkAndGsi1sk",
               KeyConditionExpression: "gsi1pk = :phone AND gsi1sk = :profile",
               ExpressionAttributeValues: {
                 ":phone": { S: `WHATSAPP#${cleanPhone}` },
@@ -280,7 +286,7 @@ export const handler = async (event: any) => {
       }
 
       if (!adminSub) {
-        console.warn("⚠️ Could not resolve adminSub for incoming message. Ignoring.");
+        console.error(`❌ adminSub resolution failed | msgType=${msgType} | contextWamid=${contextWamid ?? "none"} | displayPhone=${displayPhone} | senderPhone=${senderPhone} | messageText="${messageText.substring(0, 80)}"`);
         return { statusCode: 200, body: "OK" }; 
       }
 
@@ -358,6 +364,7 @@ export const handler = async (event: any) => {
         console.warn(`⚠️ Failed to update member record: ${err.message}`);
       }
 
+      console.log(`📤 Enqueuing to SQS | adminSub=${adminSub} | campaignId=${campaignId ?? "none"} | contextWamid=${contextWamid ?? "none"} | queue=${INBOUND_CHAT_QUEUE}`);
       await sqs.send(
         new SendMessageCommand({
           QueueUrl: INBOUND_CHAT_QUEUE,
