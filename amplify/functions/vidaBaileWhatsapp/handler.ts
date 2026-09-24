@@ -11,7 +11,6 @@ const INBOUND_CHAT_QUEUE = process.env.INBOUND_CHAT_QUEUE_URL!;
 function validateMetaSignature(body: string, signatureHeader?: string): boolean {
   const appSecret = process.env.META_APP_SECRET;
   
-  // FAIL CLOSED: Deny access if missing configuration or header
   if (!appSecret || !signatureHeader) {
       return false; 
   }
@@ -24,7 +23,6 @@ function validateMetaSignature(body: string, signatureHeader?: string): boolean 
   const signatureBuffer = Buffer.from(signatureHeader, 'utf8');
   const expectedBuffer = Buffer.from(expectedSignature, 'utf8');
 
-  // Prevent timingSafeEqual from throwing an error due to length mismatch
   if (signatureBuffer.byteLength !== expectedBuffer.byteLength) {
       return false;
   }
@@ -36,7 +34,7 @@ async function findBroadcastReceiptByWamid(wamid: string) {
   try {
     const res = await ddb.send(new QueryCommand({
       TableName: TABLE_NAME,
-      IndexName: "clubRecordsByGsi1pkAndGsi1sk",
+      IndexName: "gsi1pk", // FIXED for Amplify Gen 2
       KeyConditionExpression: "gsi1pk = :gsi1pk AND gsi1sk = :gsi1sk",
       ExpressionAttributeValues: {
         ":gsi1pk": { S: `MSG#${wamid}` },
@@ -55,10 +53,10 @@ async function findBroadcastReceiptByWamid(wamid: string) {
   }
 }
 
-async function updateBroadcastReceiptStatus(adminSub: string, sk: string, status: string, extraUpdates: Record<string, any> = {}) {
+async function updateBroadcastReceiptStatus(adminSub: string, sk: string, status: string, extraUpdates: Record = {}) {
   try {
     let updateExpr = "SET deliveryStatus = :status, updatedAt = :now";
-    const exprVals: Record<string, any> = {
+    const exprVals: Record = {
       ":status": { S: status },
       ":now": { S: new Date().toISOString() }
     };
@@ -91,7 +89,7 @@ async function resolveAdminFromDisplayPhone(displayPhone: string) {
   try {
     const res = await ddb.send(new QueryCommand({
       TableName: TABLE_NAME,
-      IndexName: "clubRecordsByGsi1pkAndGsi1sk",
+      IndexName: "gsi1pk", // FIXED for Amplify Gen 2
       KeyConditionExpression: "gsi1pk = :gsi1pk AND gsi1sk = :gsi1sk",
       ExpressionAttributeValues: {
         ":gsi1pk": { S: "WHATSAPP_MAPPING" },
@@ -107,7 +105,6 @@ async function resolveAdminFromDisplayPhone(displayPhone: string) {
 export const handler = async (event: any) => {
   console.log("🔥 Webhook event received");
 
-  // ── Meta Webhook Verification (GET) ──────────────────────────────────────
   if (event.requestContext?.http?.method === "GET") {
     const q = event.queryStringParameters || {};
     const verifyToken = process.env.META_VERIFY_TOKEN;
@@ -123,12 +120,10 @@ export const handler = async (event: any) => {
   try {
     let bodyStr = event.body || "{}";
 
-    // ── 1. DECODE BASE64 (AWS Lambda fix) ──────────────────────────────────
     if (event.isBase64Encoded) {
       bodyStr = Buffer.from(bodyStr, "base64").toString("utf8");
     }
 
-    // Validate Meta signature
     const xHubSig = event.headers?.["x-hub-signature-256"] || event.headers?.["X-Hub-Signature-256"];
     if (!validateMetaSignature(bodyStr, xHubSig)) {
       console.error(`❌ Signature mismatch! Header received: ${xHubSig || "NONE"}. (Check META_APP_SECRET)`);
@@ -147,19 +142,16 @@ export const handler = async (event: any) => {
 
     const displayPhone = value.metadata?.display_phone_number ?? "";
 
-    // ────────────────────────────────────────────────────────────────────────
-    // A. Status Receipts (delivered, read, failed)
-    // ────────────────────────────────────────────────────────────────────────
     if (value.statuses) {
       const status = value.statuses[0];
       const wamid = status.id;
-      const newStatus = status.status; // "delivered", "read", "failed"
+      const newStatus = status.status; 
 
-      console.log(`📍 Status: WAMID ${wamid} → ${newStatus}`);
+      console.log(`📍 Status: WAMID \({wamid} →\){newStatus}`);
 
       const receipt = await findBroadcastReceiptByWamid(wamid);
       if (receipt) {
-        const updates: Record<string, any> = {};
+        const updates: Record = {};
         if (newStatus === "read") {
           updates.readAt = new Date().toISOString();
           updates.isRead = true;
@@ -170,9 +162,6 @@ export const handler = async (event: any) => {
       }
     }
 
-    // ────────────────────────────────────────────────────────────────────────
-    // B. Inbound Messages
-    // ────────────────────────────────────────────────────────────────────────
     if (value.messages) {
       const msg = value.messages[0];
       const senderPhone = msg.from.startsWith('+') ? msg.from : `+${msg.from}`;
@@ -261,35 +250,35 @@ export const handler = async (event: any) => {
         }
       }
 
-      // Tier 2: Dynamic Webhook Routing via Profile Lookup
       if (!adminSub) {
-        // Extract the receiving business phone number from the Meta payload
-        const displayPhone = body.entry?.[0]?.changes?.[0]?.value?.metadata?.display_phone_number;
+        const displayPhoneRaw = body.entry?.[0]?.changes?.[0]?.value?.metadata?.display_phone_number;
         
-        if (displayPhone) {
-          const cleanPhone = displayPhone.replace('+', ''); 
+        if (displayPhoneRaw) {
+          const cleanPhone = displayPhoneRaw.replace('+', ''); 
           
-          const profileQuery = await ddb.send(new QueryCommand({
-            TableName: process.env.TABLE_NAME,
-            IndexName: "clubRecordsByGsi1pkAndGsi1sk", // Adjust if your GSI name is different
-            KeyConditionExpression: "gsi1pk = :phone AND gsi1sk = :profile",
-            ExpressionAttributeValues: {
-              ":phone": { S: `WHATSAPP#${cleanPhone}` },
-              ":profile": { S: "PROFILE" }
-            }
-          }));
+          try {
+            const profileQuery = await ddb.send(new QueryCommand({
+              TableName: process.env.TABLE_NAME,
+              IndexName: "gsi1pk", // FIXED for Amplify Gen 2
+              KeyConditionExpression: "gsi1pk = :phone AND gsi1sk = :profile",
+              ExpressionAttributeValues: {
+                ":phone": { S: `WHATSAPP#${cleanPhone}` },
+                ":profile": { S: "PROFILE" }
+              }
+            }));
 
-          if (profileQuery.Items && profileQuery.Items.length > 0) {
-            adminSub = profileQuery.Items[0].pk?.S ?? "";
-            console.log(`🎯 Tier 2 resolved via WhatsApp Number: ${adminSub}`);
+            if (profileQuery.Items && profileQuery.Items.length > 0) {
+              adminSub = profileQuery.Items[0].pk?.S ?? "";
+              console.log(`🎯 Tier 2 resolved via WhatsApp Number: ${adminSub}`);
+            }
+          } catch (err: any) {
+             console.warn(`⚠️ Failed to resolve profile: ${err.message}`);
           }
         }
       }
 
-      // Tier 3: Graceful Failure (No hardcoded IDs)
       if (!adminSub) {
         console.warn("⚠️ Could not resolve adminSub for incoming message. Ignoring.");
-        // Must return 200 OK, otherwise Meta will repeatedly retry sending the dead message
         return { statusCode: 200, body: "OK" }; 
       }
 
@@ -382,7 +371,7 @@ export const handler = async (event: any) => {
         })
       );
 
-      console.log(`📨 [${msgType}] Queued: "${messageText.substring(0, 50)}" from ${senderPhone} to chatAgent`);
+      console.log(`📨 [\({msgType}] Queued: "\){messageText.substring(0, 50)}" from ${senderPhone} to chatAgent`);
     }
 
     return { statusCode: 200, body: "OK" };
