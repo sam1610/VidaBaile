@@ -111,66 +111,49 @@ async function resolveAdminFromDisplayPhone(displayPhone: string) {
 
 
 /**
- * Tier 3: Reverse member lookup by sender phone.
+ * Tier 2b / Tier 3: Reverse phone-to-tenant lookup via GSI2.
  *
- * Strategy A — GSI2 routing record (written by this webhook on every successful
- * adminSub resolution so future messages are O(1) lookups):
- *   gsi2pk = "PHONE#<normalizedPhone>"  gsi2sk = "ADMIN"
+ * Queries gsi2pk = "PHONE#<phone>" on the GSI2 index.  Two record types
+ * populate this index:
  *
- * Strategy B — Scan BROADCAST_RECEIPT records for a matching recipientPhone.
- *   Falls back to a base-table Query per known adminSub prefix pattern.
- *   Used when no routing record exists yet (first-ever free-text from this number).
+ *   1. BROADCAST_RECEIPT (written by vidaBaileProcessOutboundQueue):
+ *        gsi2pk = PHONE#<recipientPhone>
+ *        gsi2sk = ADMIN#<adminSub>
+ *      Available from the very first broadcast send — no prior interaction needed.
  *
- * Both strategies are attempted in order and the first result wins.
+ *   2. MEMBER routing stamp (written by writePhoneRoutingRecord below):
+ *        gsi2pk = PHONE#<senderPhone>
+ *        gsi2sk = ADMIN#<adminSub>   (same shape, same query)
+ *      Written after every successful message so subsequent lookups stay O(1).
+ *
+ * Both record types use the same gsi2sk prefix so a single begins_with query
+ * returns the adminSub regardless of which record type matched first.
+ * No env var, no hardcoded SUB, no redeployment when a new club signs up.
  */
 async function resolveAdminFromSenderPhone(senderPhone: string): Promise<string | null> {
   const normalizedPhone = senderPhone.startsWith("+") ? senderPhone : `+${senderPhone}`;
-  console.log(`🔎 Tier 3 reverse-member lookup | senderPhone=${normalizedPhone}`);
+  console.log(`🔎 Tier 3 GSI2 phone lookup | senderPhone=${normalizedPhone}`);
 
-  // ── Strategy A: GSI2 routing record ─────────────────────────────────────
   try {
-    const routingRes = await ddb.send(new QueryCommand({
+    const res = await ddb.send(new QueryCommand({
       TableName: TABLE_NAME,
       IndexName: "clubRecordsByGsi2pkAndGsi2sk",
-      KeyConditionExpression: "gsi2pk = :gsi2pk AND gsi2sk = :gsi2sk",
+      KeyConditionExpression: "gsi2pk = :gsi2pk AND begins_with(gsi2sk, :prefix)",
       ExpressionAttributeValues: {
-        ":gsi2pk": { S: `PHONE#${normalizedPhone}` },
-        ":gsi2sk": { S: "ADMIN" },
+        ":gsi2pk":  { S: `PHONE#${normalizedPhone}` },
+        ":prefix":  { S: "ADMIN#" },
       },
       Limit: 1,
     }));
-    const hit = routingRes.Items?.[0];
+    const hit = res.Items?.[0];
     if (hit?.pk?.S) {
-      console.log(`✅ Tier 3 Strategy A | GSI2 routing record found | adminSub=${hit.pk.S}`);
+      console.log(`✅ Tier 3 GSI2 resolved | adminSub=${hit.pk.S} | gsi2sk=${hit.gsi2sk?.S}`);
       return hit.pk.S;
     }
+    console.warn(`⚠️ Tier 3 GSI2 | no record for PHONE#${normalizedPhone} — member may not have received a broadcast yet`);
   } catch (err: any) {
-    console.warn(`⚠️ Tier 3 Strategy A failed: ${err.message}`);
+    console.error(`❌ Tier 3 GSI2 query failed: ${err.message}`);
   }
-
-  // ── Strategy B: scan BROADCAST_RECEIPT records for this recipientPhone ──
-  // Query BROADCAST_RECEIPT items where gsi1sk = "WEBHOOK" and filter
-  // on recipientPhone.  We can't do a cross-partition scan efficiently, but
-  // we CAN query the GSI1 for all WEBHOOK records and filter client-side
-  // for the matching phone.  To bound the scan we use a GSI1 KeyCondition
-  // on gsi1sk = "WEBHOOK" via the GSI1 sort key — this returns only
-  // BROADCAST_RECEIPT records.  We limit to the most recent 100 to keep
-  // latency acceptable for new members.
-  try {
-    // gsi1pk values for receipts look like MSG#<wamid> — we cannot enumerate
-    // them without knowing wamid.  Instead, use a base-table scan bounded by
-    // FilterExpression on recipientPhone across BROADCAST# sk range.
-    // This requires no new GSI and is bounded because the outer FilterExpression
-    // is applied after DynamoDB pages through matching items.
-    //
-    // We need at least one adminSub candidate.  Without it this query can't
-    // proceed.  Return null to avoid a full-table scan.
-    console.log(`⚠️ Tier 3 Strategy B skipped — no adminSub candidate available for bounded query`);
-  } catch (err: any) {
-    console.warn(`⚠️ Tier 3 Strategy B failed: ${err.message}`);
-  }
-
-  console.warn(`⚠️ Tier 3 exhausted — could not resolve adminSub for ${normalizedPhone}`);
   return null;
 }
 
@@ -196,7 +179,7 @@ async function writePhoneRoutingRecord(adminSub: string, senderPhone: string): P
       UpdateExpression: "SET gsi2pk = :gsi2pk, gsi2sk = :gsi2sk, updatedAt = :now",
       ExpressionAttributeValues: {
         ":gsi2pk": { S: `PHONE#${normalizedPhone}` },
-        ":gsi2sk": { S: "ADMIN" },
+        ":gsi2sk": { S: `ADMIN#${adminSub}` },
         ":now":    { S: new Date().toISOString() },
       },
     }));
@@ -378,61 +361,17 @@ export const handler = async (event: any) => {
         }
       }
 
-      // ── Tier 3: senderPhone → most-recent BROADCAST_RECEIPT (no GSI needed)
-      // Query BROADCAST_RECEIPT records filtered by recipientPhone. This is the
-      // only path that works for first-ever free-text with no contextWamid.
-      // We don't know adminSub so we can't do a base-table Key query — instead
-      // we leverage the fact that the GSI1 index holds all BROADCAST_RECEIPT
-      // items keyed by MSG#<wamid>. We can't enumerate wamids, so instead we
-      // do a targeted Query on the base table for BROADCAST# sk range scoped
-      // to DEFAULT_ADMIN_SUB (single-tenant) or environment-provided fallback.
-      //
-      // Multi-tenant production path: iterate over known adminSub candidates
-      // sourced from an environment variable ADMIN_SUB_LIST (comma-separated).
+      // ── Tier 3: senderPhone → GSI2 phone-to-tenant index ───────────────
+      // Queries gsi2pk = "PHONE#<senderPhone>" on the GSI2 index.
+      // BROADCAST_RECEIPT records are stamped with this key by the outbound
+      // processor at send time — so this works from the very first reply,
+      // with no env var, no hardcoded SUB, and no redeployment needed when
+      // a new club joins the platform.
       if (!adminSub) {
-        const normalizedSender = senderPhone.startsWith("+") ? senderPhone : `+${senderPhone}`;
-        const adminCandidates: string[] = [];
-
-        // Collect candidates from environment (set ADMIN_SUB_LIST=sub1,sub2,... in resource.ts)
-        const adminSubList = process.env.ADMIN_SUB_LIST ?? process.env.DEFAULT_ADMIN_SUB ?? "";
-        if (adminSubList) {
-          adminCandidates.push(...adminSubList.split(",").map(s => s.trim()).filter(Boolean));
-        }
-
-        console.log(`🔎 Tier 3 BROADCAST_RECEIPT scan | candidates=${adminCandidates.length} | phone=${normalizedSender}`);
-
-        for (const candidate of adminCandidates) {
-          try {
-            const receiptQuery = await ddb.send(new QueryCommand({
-              TableName: TABLE_NAME,
-              KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-              FilterExpression: "recipientPhone = :phone",
-              ExpressionAttributeValues: {
-                ":pk":     { S: candidate },
-                ":prefix": { S: "BROADCAST#" },
-                ":phone":  { S: normalizedSender },
-              },
-              ScanIndexForward: false,
-              Limit: 20,
-            }));
-
-            if (receiptQuery.Items?.length) {
-              adminSub = candidate;
-              // Also recover campaignId from the most-recent receipt sk
-              if (!campaignId) {
-                const recentSk = receiptQuery.Items[0].sk?.S ?? "";
-                const m = recentSk.match(/^BROADCAST#([^#]+)#MEMBER#/);
-                if (m?.[1]) {
-                  campaignId = m[1];
-                  console.log(`📋 Tier 3 campaignId recovered: ${campaignId}`);
-                }
-              }
-              console.log(`🎯 Tier 3 resolved via BROADCAST_RECEIPT recipientPhone scan: ${adminSub}`);
-              break;
-            }
-          } catch (err: any) {
-            console.warn(`⚠️ Tier 3 candidate ${candidate} query failed: ${err.message}`);
-          }
+        const resolved = await resolveAdminFromSenderPhone(senderPhone);
+        if (resolved) {
+          adminSub = resolved;
+          console.log(`🎯 Tier 3 resolved via GSI2 phone-to-tenant index: ${adminSub}`);
         }
       }
 
@@ -442,7 +381,8 @@ export const handler = async (event: any) => {
           `msgType=${msgType} | contextWamid=${contextWamid ?? "none"} | ` +
           `displayPhone=${displayPhone} | senderPhone=${senderPhone} | ` +
           `messageText="${messageText.substring(0, 80)}" | ` +
-          `HINT: Set ADMIN_SUB_LIST or DEFAULT_ADMIN_SUB env var in vidaBaileWhatsapp resource.ts`
+          `HINT: Ensure the outbound processor has sent at least one broadcast to this member — ` +
+          `GSI2 routing is stamped automatically on send. No env var or redeployment needed.`
         );
         return { statusCode: 200, body: "OK" };
       }

@@ -218,6 +218,13 @@ export const handler = async (event: any) => {
             entityType:        { S: "BROADCAST_RECEIPT" },
             gsi1pk:            { S: `MSG#${wamid}` },
             gsi1sk:            { S: "WEBHOOK" },
+            // GSI2: phone-to-tenant routing index.
+            // Allows the webhook to resolve adminSub for any free-text reply
+            // from this recipient without knowing contextWamid or requiring
+            // any hardcoded env var.  Multi-tenant safe: different admins
+            // produce different pk values; the GSI returns the correct one.
+            gsi2pk:            { S: `PHONE#${recipientPhone}` },
+            gsi2sk:            { S: `ADMIN#${adminSub}` },
             deliveryStatus:    { S: deliveryStatus },
             hasReplied:        { BOOL: false },
             whatsappMessageId: { S: wamid },
