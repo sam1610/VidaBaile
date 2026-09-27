@@ -493,14 +493,13 @@ export const handler = async (event: any) => {
               name: "flow",
               parameters: {
                 flow_message_version: "3",
-                // FIXED 1: Format matches your resolveTenantSub logic
-                flow_token: `CHAT_ADMIN#${adminSub}`, 
+                // Pass both adminSub and phone number as a base64 JSON object
+                flow_token: Buffer.from(JSON.stringify({ adminSub, phone: senderPhone })).toString("base64"), 
                 flow_id: "2184446669618705",
                 flow_cta: "Our Packages",
                 flow_action: "navigate",
                 flow_action_payload: {
-                  // FIXED 2: Matches your INIT responseScreen
-                  screen: "Packages_Screen" 
+                  screen: "Packages_Screen"
                 }
               }
             }

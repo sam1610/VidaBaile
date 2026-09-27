@@ -69,49 +69,92 @@ function resolveBroadcastId(decryptedData: any): string | null {
 // ────────────────────────────────────────────────────────────────────────────
 // 3. Data Fetching Helpers
 // ────────────────────────────────────────────────────────────────────────────
-async function fetchActivePackages(adminSub: string) {
-  // Get today's date in YYYY-MM-DD format to match your DynamoDB records
+// async function fetchActivePackages(adminSub: string) {
+//   // Get today's date in YYYY-MM-DD format to match your DynamoDB records
+//   const today = new Date().toISOString().split("T")[0]; 
+
+//   const res = await ddb.send(new QueryCommand({
+//     TableName: TABLE_NAME,
+//     KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+//     ExpressionAttributeValues: {
+//       ":pk": { S: adminSub },
+//       ":prefix": { S: "BROADCAST#" } // Target broadcast items
+//     }
+//   }));
+  
+//   const items = res.Items || [];
+  
+//   // 1. Filter out expired or future broadcasts
+//   // 2. Map to the Flow UI Schema
+//   return items.filter(item => {
+//     const validFrom = item.validFrom?.S;
+//     const validUntil = item.validUntil?.S;
+    
+//     // Only include broadcasts where today falls within the valid range
+//     if (validFrom && validUntil) {
+//       return validFrom <= today && validUntil >= today;
+//     }
+//     return false;
+//   }).map(item => {
+//     // Use broadcast ID as the unique RadioButtonsGroup id (avoids duplicate id when
+//     // multiple broadcasts reference the same catalog package).
+//     // Encode catalog packageId into the id so FETCH_PACKAGE_DETAILS can resolve it.
+//     // Format: "<broadcastId>|<catalogPackageId>"
+//     const broadcastId = (item.sk?.S || "").replace("BROADCAST#", "");
+//     const catalogPackageId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
+//     return {
+//       id:          `${broadcastId}|${catalogPackageId}`,
+//       title:       item.name?.S || "Dance Package",
+//       description: item.promotionalContent?.S
+//         ? item.promotionalContent.S.substring(0, 60)
+//         : "Exclusive dance offer",
+//     };
+//   });
+// }
+async function fetchActivePackages(adminSub: string, broadcastId: string | null) {
   const today = new Date().toISOString().split("T")[0]; 
 
-  const res = await ddb.send(new QueryCommand({
-    TableName: TABLE_NAME,
-    KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-    ExpressionAttributeValues: {
-      ":pk": { S: adminSub },
-      ":prefix": { S: "BROADCAST#" } // Target broadcast items
-    }
-  }));
-  
-  const items = res.Items || [];
-  
-  // 1. Filter out expired or future broadcasts
-  // 2. Map to the Flow UI Schema
-  return items.filter(item => {
-    const validFrom = item.validFrom?.S;
-    const validUntil = item.validUntil?.S;
+  if (broadcastId) {
+    // ── SCENARIO A: User clicked a Broadcast Message ──
+    const res = await ddb.send(new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": { S: adminSub }, ":prefix": { S: "BROADCAST#" } }
+    }));
     
-    // Only include broadcasts where today falls within the valid range
-    if (validFrom && validUntil) {
-      return validFrom <= today && validUntil >= today;
-    }
-    return false;
-  }).map(item => {
-    // Use broadcast ID as the unique RadioButtonsGroup id (avoids duplicate id when
-    // multiple broadcasts reference the same catalog package).
-    // Encode catalog packageId into the id so FETCH_PACKAGE_DETAILS can resolve it.
-    // Format: "<broadcastId>|<catalogPackageId>"
-    const broadcastId = (item.sk?.S || "").replace("BROADCAST#", "");
-    const catalogPackageId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
-    return {
-      id:          `${broadcastId}|${catalogPackageId}`,
-      title:       item.name?.S || "Dance Package",
-      description: item.promotionalContent?.S
-        ? item.promotionalContent.S.substring(0, 60)
-        : "Exclusive dance offer",
-    };
-  });
-}
+    return (res.Items || []).filter(item => {
+      const validFrom = item.validFrom?.S;
+      const validUntil = item.validUntil?.S;
+      if (validFrom && validUntil) return validFrom <= today && validUntil >= today;
+      return false;
+    }).map(item => {
+      const bId = (item.sk?.S || "").replace("BROADCAST#", "");
+      const cId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
+      return {
+        id: `\({bId}|\){cId}`,
+        title: item.name?.S || "Dance Package",
+        description: item.promotionalContent?.S ? item.promotionalContent.S.substring(0, 60) : "Exclusive offer",
+      };
+    });
 
+  } else {
+    // ── SCENARIO B: User asked the Chat Agent directly ──
+    const res = await ddb.send(new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": { S: adminSub }, ":prefix": { S: "CATALOG#" } }
+    }));
+    
+    return (res.Items || []).filter(item => (item.status?.S || "ACTIVE") === "ACTIVE").map(item => {
+      const catalogPackageId = (item.sk?.S || "").replace("CATALOG#", "");
+      return {
+        id: catalogPackageId,
+        title: item.name?.S || item.packageType?.S || "Dance Package",
+        description: `Price: ${item.price?.N ?? item.price?.S ?? "Contact for price"} BHD.`
+      };
+    });
+  }
+}
 async function fetchPackageById(adminSub: string, packageId: string) {
   const res = await ddb.send(new GetItemCommand({
     TableName: TABLE_NAME,
@@ -208,13 +251,14 @@ export const handler = async (event: any) => {
     }
 
     const adminSub = resolveTenantSub(decryptedData);
+    const broadcastId = resolveBroadcastId(decryptedData);
     let responseScreen = "";
     let responseData: any = {};
     
     // ── ROUTING STATE MACHINE ──
     if (decryptedData.action === "INIT") {
       const t0 = Date.now();
-      const activePackages = await fetchActivePackages(adminSub);
+      const activePackages = await fetchActivePackages(adminSub, broadcastId);
       console.log(`⏱️ fetchActivePackages: ${Date.now() - t0}ms, found ${activePackages.length} packages`);
       console.log(`📦 Found ${activePackages.length} packages for Admin: ${adminSub}`);
 
@@ -231,7 +275,7 @@ export const handler = async (event: any) => {
       // ── 0. Meta routing error notification — log and return Packages_Screen gracefully ──
       if (payload.error === "invalid-screen-transition") {
         console.error(`❌ Meta routing error: ${payload.error_message}`);
-        const activePackages = await fetchActivePackages(adminSub);
+        const activePackages = await fetchActivePackages(adminSub, broadcastId);
         responseScreen = "Packages_Screen";
         responseData = { packages_list: activePackages };
       }
@@ -384,7 +428,7 @@ export const handler = async (event: any) => {
         // Unknown action — log it so we can diagnose unexpected payloads
         console.error(`❌ Unknown data_exchange action: ${payload?.action}. Full payload:`, JSON.stringify(payload));
         // Return the packages screen as a safe fallback so the user isn't stuck
-        const activePackages = await fetchActivePackages(adminSub);
+        const activePackages = await fetchActivePackages(adminSub, broadcastId);
         responseScreen = "Packages_Screen";
         responseData = { packages_list: activePackages };
       }
