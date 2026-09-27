@@ -160,7 +160,13 @@ async function getKnowledgeBase(
         const title = item.name?.S || item.packageType?.S || item.sk?.S?.replace("CATALOG#", "") || "Package";
         const price = item.price?.N ?? item.price?.S ?? "Contact for price";
         const credits = item.totalCredits?.N ? `${item.totalCredits.N} credits` : "Subscription";
-        const desc = item.packageKnowledgeBase?.S ? ` - ${item.packageKnowledgeBase.S.substring(0, 100)}...` : "";
+        const fullDesc = item.packageKnowledgeBase?.S || "";
+        // Match everything up to and including the first period, exclamation, or question mark
+        const firstSentenceMatch = fullDesc.match(/^[^.!?]+[.!?]/);
+        // Fallback to the first line if no punctuation is found
+        const conciseDesc = firstSentenceMatch ? firstSentenceMatch[0].trim() : fullDesc.split('\n')[0].trim();
+        
+        const desc = conciseDesc ? ` - ${conciseDesc}` : "";
         
         // FIXED: Restored proper ${} template literal syntax so variables are read correctly
         return `• ${title}  (BD ${price} | ${credits}) ${desc}`;
@@ -534,7 +540,7 @@ export const handler = async (event: any) => {
       }
 
       if (isCatalogTrigger) {
-        console.log(`🎯 Booking intent detected. Sending structured Catalog message.`);
+        console.log(`🎯 Booking intent detected. Sending Meta Flow message.`);
         
         const payload: any = {
           messaging_product: "whatsapp",
@@ -542,7 +548,7 @@ export const handler = async (event: any) => {
           to: senderPhone.replace(/^\+/, ""),
           type: "interactive",
           interactive: {
-            type: "button",
+            type: "flow",
             header: {
               type: "text",
               text: "La Vida Dance Club"
@@ -554,15 +560,17 @@ export const handler = async (event: any) => {
               text: "@LaVidaDance"
             },
             action: {
-              buttons: [
-                {
-                  type: "reply",
-                  reply: {
-                    id: "BTN_DISCOVER_PACKAGES", // Ensure your Meta Flow Lambda listens for this ID
-                    title: "Our Packages"
-                  }
+              name: "flow",
+              parameters: {
+                flow_message_version: "3",
+                flow_token: `ENROLL_${adminSub}`, 
+                flow_id: "2184446669618705", // Your exact Flow ID
+                flow_cta: "Our Packages",
+                flow_action: "navigate",
+                flow_action_payload: {
+                  screen: "YOUR_FIRST_SCREEN_NAME" // Replace with the ID of your Select a Package screen
                 }
-              ]
+              }
             }
           }
         };
@@ -578,7 +586,6 @@ export const handler = async (event: any) => {
           body: JSON.stringify(payload),
         });
 
-        // Set a clean history string so the AI remembers the user was shown the catalog
         assistantReply = "I have sent you the package catalog to complete your enrollment.";
       
       } else {
