@@ -131,7 +131,7 @@ async function fetchActivePackages(adminSub: string, broadcastId: string | null)
       const bId = (item.sk?.S || "").replace("BROADCAST#", "");
       const cId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
       return {
-        id: `\({bId}|\){cId}`,
+        id: `${bId}|${cId}`,
         title: item.name?.S || "Dance Package",
         description: item.promotionalContent?.S ? item.promotionalContent.S.substring(0, 60) : "Exclusive offer",
       };
