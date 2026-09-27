@@ -462,77 +462,7 @@ export const handler = async (event: any) => {
         }
       }
       assistantReply = assistantReply.trim() || "We will get back to you shortly.";
-      
-      // ── 1. Check if the AI decided to trigger the catalog ─────────────────
-      // let isCatalogTrigger = false;
-      // if (assistantReply.includes("[TRIGGER_CATALOG]")) {
-      //   isCatalogTrigger = true;
-      //   // Strip the hidden tag so the user doesn't see it
-      //   assistantReply = assistantReply.replace("[TRIGGER_CATALOG]", "").trim();
-      // }
-
-      // console.log(`💬 Reply generated (${assistantReply.length} chars) | isCatalogTrigger:${isCatalogTrigger}`);
-
-      // const chunks = assistantReply.split(/\n\n+/).map(c => c.trim()).filter(Boolean);
-      
-      // for (let i = 0; i < chunks.length; i++) {
-      //   let payload: any;
-
-      //   // ── 2. Send Interactive Button if triggered, otherwise standard text ──
-      //   if (isCatalogTrigger && i === chunks.length - 1) {
-      //     payload = {
-      //       messaging_product: "whatsapp",
-      //       recipient_type: "individual",
-      //       to: senderPhone.replace(/^\+/, ""),
-      //       type: "interactive",
-      //       interactive: {
-      //         type: "button",
-      //         body: { text: chunks[i] || "Click below to discover our packages and enroll:" },
-      //         action: {
-      //           buttons: [
-      //             {
-      //               type: "reply",
-      //               reply: {
-      //                 id: "BTN_DISCOVER_PACKAGES", // Webhook will catch this ID
-      //                 title: "Discover Packages"
-      //               }
-      //             }
-      //           ]
-      //         }
-      //       }
-      //     };
-      //   } else {
-      //     payload = {
-      //       messaging_product: "whatsapp",
-      //       recipient_type:    "individual",
-      //       to:                senderPhone.replace(/^\+/, ""),
-      //       type:              "text",
-      //       text:              { body: chunks[i] },
-      //     };
-      //   }
-
-      //   if (contextWamid && i === 0) payload.context = { message_id: contextWamid };
-
-      //   console.log(`📲 WhatsApp send attempt | to=${payload.to} | chunk=\){i+1}/${chunks.length} | phoneId=${WHATSAPP_PHONE_ID}`);
-      //   const res = await fetch(
-      //     `https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_ID}/messages`,
-      //     {
-      //       method:  "POST",
-      //       headers: {
-      //         Authorization:  `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
-      //         "Content-Type": "application/json",
-      //       },
-      //       body: JSON.stringify(payload),
-      //     }
-      //   );
-      //   if (!res.ok) {
-      //     const err = await res.json();
-      //     console.error(`❌ WhatsApp send failed (chunk ${i}) | to=\){payload.to} | status=${res.status}:`, err);
-      //     break;
-      //   }
-      //   console.log(`✅ WhatsApp chunk ${i+1} sent`);
-      //   if (i < chunks.length - 1) await sleep(1500);
-      // }
+    
       // ── 1. Intercept Booking Intent ───────────────────────────────────────
       let isCatalogTrigger = false;
       if (assistantReply.includes("[TRIGGER_CATALOG]")) {
@@ -563,12 +493,14 @@ export const handler = async (event: any) => {
               name: "flow",
               parameters: {
                 flow_message_version: "3",
-                flow_token: `ENROLL_${adminSub}`, 
-                flow_id: "2184446669618705", // Your exact Flow ID
+                // FIXED 1: Format matches your resolveTenantSub logic
+                flow_token: `CHAT_ADMIN#${adminSub}`, 
+                flow_id: "2184446669618705",
                 flow_cta: "Our Packages",
                 flow_action: "navigate",
                 flow_action_payload: {
-                  screen: "YOUR_FIRST_SCREEN_NAME" // Replace with the ID of your Select a Package screen
+                  // FIXED 2: Matches your INIT responseScreen
+                  screen: "Packages_Screen" 
                 }
               }
             }
@@ -577,7 +509,8 @@ export const handler = async (event: any) => {
 
         if (contextWamid) payload.context = { message_id: contextWamid };
 
-        await fetch(`https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_ID}/messages`, {
+        console.log(`📲 Sending Meta Flow payload...`);
+        const flowRes = await fetch(`https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_ID}/messages`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${WHATSAPP_ACCESS_TOKEN}`,
@@ -585,6 +518,13 @@ export const handler = async (event: any) => {
           },
           body: JSON.stringify(payload),
         });
+
+        const flowData = await flowRes.json();
+        if (!flowRes.ok) {
+          console.error(`❌ Meta Flow send failed:`, JSON.stringify(flowData));
+        } else {
+          console.log(`✅ Meta Flow message sent successfully!`);
+        }
 
         assistantReply = "I have sent you the package catalog to complete your enrollment.";
       
