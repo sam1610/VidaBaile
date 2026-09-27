@@ -29,12 +29,16 @@ const MODEL_ANALYSIS = "amazon.nova-micro-v1:0";
 const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 
 const SYSTEM_PROMPT =
-  "You are the official customer service assistant for VidaBaile Dance Club.\n" +
-  "RULE 1: ALWAYS reply in the exact same language as the user's message.\n" +
-  "RULE 2: Answer strictly using ONLY the [PACKAGE CONTEXT] below. If the context does not contain the answer, politely state you do not have that information.\n" +
-  "RULE 3: BE EXTREMELY BRIEF. Write a maximum of 1 to 2 short sentences. Answer ONLY the specific question asked.\n" +
-  "RULE 4: CURRENT CONTEXT OVERRIDES HISTORY. The [PACKAGE CONTEXT] below is the absolute truth. If your chat history contains information about a different package or dance style, you MUST ignore the history and use ONLY the new context below.\n\n" +
-  "[PACKAGE CONTEXT]\n{KNOWLEDGE_BASE_TEXT}";
+  "You are the official customer service assistant for VidaBaile Dance Club.\n\n" +
+  "CRITICAL LANGUAGE RULE:\n" +
+  "- Detect the language of the user's LATEST message (e.g., French, English, Spanish, Arabic).\n" +
+  "- Reply EXCLUSIVELY in that exact same language.\n" +
+  "- NEVER default to the language of the [CLUB & PACKAGE CONTEXT] or previous turns in the chat history.\n\n" +
+  "KNOWLEDGE BOUNDARY RULES:\n" +
+  "1. Answer strictly using ONLY the [CLUB & PACKAGE CONTEXT] below. If information is not present, state politely that you don't have that detail.\n" +
+  "2. If the user asks for available packages or alternatives, list the packages found in [AVAILABLE PACKAGES DIRECTORY].\n" +
+  "3. Keep answers concise: 1 to 2 short sentences unless the user explicitly asks for a list.\n\n" +
+  "[CLUB & PACKAGE CONTEXT]\n{KNOWLEDGE_BASE_TEXT}";
 
 async function getMemberProfile(adminSub: string, phone: string) :Promise<{
   name: string;
@@ -111,6 +115,132 @@ async function getMemberProfile(adminSub: string, phone: string) :Promise<{
 
 // FIXED: Promise
 // FIXED: Promise and template literals
+// async function getKnowledgeBase(
+//   adminSub: string,
+//   campaignId: string | null | undefined,
+//   packageIntent: string | null | undefined,
+//   senderPhone: string
+// ): Promise<string> {
+//   console.log(`🔍 KB Lookup | campaignId: \({campaignId || "NULL"} | phone:\){senderPhone}`);
+
+//   // 1. Auto-recover campaignId if missing
+//   if (!campaignId) {
+//     try {
+//       const recentRes = await ddb.send(
+//         new QueryCommand({
+//           TableName: TABLE_NAME,
+//           KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+//           FilterExpression: "recipientPhone = :phone",
+//           ExpressionAttributeValues: {
+//             ":pk": { S: adminSub },
+//             ":prefix": { S: "BROADCAST#" },
+//             ":phone": { S: senderPhone } 
+//           }
+//         })
+//       );
+      
+//       const items = recentRes.Items || [];
+//       if (items.length > 0) {
+//         items.sort((a, b) => (b.createdAt?.S || "").localeCompare(a.createdAt?.S || ""));
+
+//         for (const item of items) {
+//           const skVal = item.sk?.S;
+//           if (!skVal) continue;
+//           const match = skVal.match(/^BROADCAST#([^#]+)#MEMBER#/);
+//           if (!match?.[1]) continue;
+//           const candidateId = match[1];
+
+//           let parentStatus: string | undefined;
+//           try {
+//             const parentRes = await ddb.send(
+//               new GetItemCommand({
+//                 TableName: TABLE_NAME,
+//                 Key: { pk: { S: adminSub }, sk: { S: `BROADCAST#${candidateId}` } },
+//               })
+//             );
+//             parentStatus = parentRes.Item?.broadcastStatus?.S;
+//           } catch { }
+
+//           if (parentStatus === "COMPLETED" && items.indexOf(item) < items.length - 1) {
+//             continue;
+//           }
+
+//           campaignId = candidateId;
+//           console.log(`🪄 Recovered campaignId: \({campaignId} (status=\){parentStatus ?? "none"})`);
+//           break;
+//         }
+//       }
+//     } catch (err: any) {
+//       console.warn(`⚠️ Auto-recovery failed: ${err.message}`);
+//     }
+//   }
+
+//   let combinedKb = "";
+
+//   // 2. Fetch Campaign Context AND Package Context
+//   if (campaignId) {
+//     try {
+//       const broadcastRes = await ddb.send(
+//         new GetItemCommand({
+//           TableName: TABLE_NAME,
+//           Key: { pk: { S: adminSub }, sk: { S: `BROADCAST#${campaignId}` } },
+//         })
+//       );
+
+//       const campaignKb = broadcastRes.Item?.campaignKnowledgeBase?.S;
+//       if (campaignKb) {
+//         console.log(`📚 Campaign KB loaded (${campaignId})`);
+//         combinedKb += `[CAMPAIGN INSTRUCTIONS]\n${campaignKb}\n\n`;
+//       }
+
+//       // Deep-fetch the linked CATALOG package details
+//       const packageRef = broadcastRes.Item?.packageIntent?.S || broadcastRes.Item?.packageRef?.S;
+//       if (packageRef) {
+//         const catalogSk = packageRef.startsWith("CATALOG#") ? packageRef : `CATALOG#${packageRef}`;
+//         const catalogRes = await ddb.send(
+//           new GetItemCommand({
+//             TableName: TABLE_NAME,
+//             Key: { pk: { S: adminSub }, sk: { S: catalogSk } },
+//           })
+//         );
+//         const packageKb = catalogRes.Item?.packageKnowledgeBase?.S;
+//         if (packageKb) {
+//           console.log(`📦 Catalog KB successfully loaded via ${catalogSk}`);
+//           combinedKb += `[PACKAGE DETAILS]\n${packageKb}\n\n`;
+//         }
+//       }
+//     } catch (err: any) {
+//       console.warn(`⚠️ KB fetch error: ${err.message}`);
+//     }
+//   }
+
+//   // 3. Fallback to direct package fetch if no campaign was found
+//   if (!campaignId && packageIntent) {
+//     try {
+//       const res = await ddb.send(
+//         new GetItemCommand({
+//           TableName: TABLE_NAME,
+//           Key: { pk: { S: adminSub }, sk: { S: `CATALOG#${packageIntent}` } },
+//         })
+//       );
+//       const packageKb = res.Item?.packageKnowledgeBase?.S;
+//       if (packageKb) {
+//         console.log(`📦 Package KB loaded directly (${packageIntent})`);
+//         combinedKb += `[PACKAGE DETAILS]\n${packageKb}\n\n`;
+//       }
+//     } catch (err: any) {
+//       console.warn(`⚠️ Package KB fetch error: ${err.message}`);
+//     }
+//   }
+
+//   // Return the combined knowledge base if anything was found
+//   if (combinedKb.trim()) {
+//     return combinedKb.trim();
+//   }
+
+//   console.log("ℹ️ No KB found — model will enforce boundary rule");
+//   return "No specific package or campaign context available for this conversation.";
+// }
 async function getKnowledgeBase(
   adminSub: string,
   campaignId: string | null | undefined,
@@ -119,7 +249,57 @@ async function getKnowledgeBase(
 ): Promise<string> {
   console.log(`🔍 KB Lookup | campaignId: \({campaignId || "NULL"} | phone:\){senderPhone}`);
 
-  // 1. Auto-recover campaignId if missing
+  const sections: string[] = [];
+
+  // ── 1. Layer 1: General Club Profile (Settings) ───────────────────────────
+  try {
+    const profileRes = await ddb.send(
+      new GetItemCommand({
+        TableName: TABLE_NAME,
+        Key: { pk: { S: adminSub }, sk: { S: "PROFILE#SETTINGS" } },
+      })
+    );
+    const clubInfo = profileRes.Item?.generalInfo?.S; 
+    if (clubInfo) {
+      sections.push(`[CLUB INFORMATION & POLICIES]\n${clubInfo}`);
+    }
+  } catch (err: any) {
+    console.warn(`⚠️ Failed to load club profile: ${err.message}`);
+  }
+
+  // ── 2. Layer 2: All Active Packages Directory ─────────────────────────────
+  try {
+    const catalogRes = await ddb.send(
+      new QueryCommand({
+        TableName: TABLE_NAME,
+        KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+        ExpressionAttributeValues: {
+          ":pk": { S: adminSub },
+          ":prefix": { S: "CATALOG#" },
+        },
+      })
+    );
+
+    const activePackages = (catalogRes.Items || [])
+      .filter((item) => (item.status?.S || "ACTIVE") === "ACTIVE")
+      .map((item) => {
+        const title = item.name?.S || item.packageType?.S || item.sk?.S?.replace("CATALOG#", "") || "Package";
+        const price = item.price?.N ?? item.price?.S ?? "Contact for price";
+        const credits = item.totalCredits?.N ? `${item.totalCredits.N} credits` : "Subscription";
+        const desc = item.packageKnowledgeBase?.S ? ` - ${item.packageKnowledgeBase.S.substring(0, 100)}...` : "";
+        
+        // FIXED: Restored proper ${} template literal syntax so variables are read correctly
+        return `• \({title} (\)\({price} |\){credits})${desc}`;
+      });
+
+    if (activePackages.length > 0) {
+      sections.push(`[AVAILABLE PACKAGES DIRECTORY]\n${activePackages.join("\n")}`);
+    }
+  } catch (err: any) {
+    console.warn(`⚠️ Failed to load catalog index: ${err.message}`);
+  }
+
+  // ── 3. Layer 3: Deep Context for Featured Campaign / Package ──────────────
   if (!campaignId) {
     try {
       const recentRes = await ddb.send(
@@ -171,9 +351,6 @@ async function getKnowledgeBase(
     }
   }
 
-  let combinedKb = "";
-
-  // 2. Fetch Campaign Context AND Package Context
   if (campaignId) {
     try {
       const broadcastRes = await ddb.send(
@@ -186,10 +363,9 @@ async function getKnowledgeBase(
       const campaignKb = broadcastRes.Item?.campaignKnowledgeBase?.S;
       if (campaignKb) {
         console.log(`📚 Campaign KB loaded (${campaignId})`);
-        combinedKb += `[CAMPAIGN INSTRUCTIONS]\n${campaignKb}\n\n`;
+        sections.push(`[CURRENT PROMO INSTRUCTIONS]\n${campaignKb}`);
       }
 
-      // Deep-fetch the linked CATALOG package details
       const packageRef = broadcastRes.Item?.packageIntent?.S || broadcastRes.Item?.packageRef?.S;
       if (packageRef) {
         const catalogSk = packageRef.startsWith("CATALOG#") ? packageRef : `CATALOG#${packageRef}`;
@@ -202,7 +378,7 @@ async function getKnowledgeBase(
         const packageKb = catalogRes.Item?.packageKnowledgeBase?.S;
         if (packageKb) {
           console.log(`📦 Catalog KB successfully loaded via ${catalogSk}`);
-          combinedKb += `[PACKAGE DETAILS]\n${packageKb}\n\n`;
+          sections.push(`[CURRENT PROMO DETAILED SYLLABUS]\n${packageKb}`);
         }
       }
     } catch (err: any) {
@@ -210,7 +386,6 @@ async function getKnowledgeBase(
     }
   }
 
-  // 3. Fallback to direct package fetch if no campaign was found
   if (!campaignId && packageIntent) {
     try {
       const res = await ddb.send(
@@ -222,22 +397,20 @@ async function getKnowledgeBase(
       const packageKb = res.Item?.packageKnowledgeBase?.S;
       if (packageKb) {
         console.log(`📦 Package KB loaded directly (${packageIntent})`);
-        combinedKb += `[PACKAGE DETAILS]\n${packageKb}\n\n`;
+        sections.push(`[PACKAGE DETAILS]\n${packageKb}`);
       }
     } catch (err: any) {
       console.warn(`⚠️ Package KB fetch error: ${err.message}`);
     }
   }
 
-  // Return the combined knowledge base if anything was found
-  if (combinedKb.trim()) {
-    return combinedKb.trim();
+  if (sections.length > 0) {
+    return sections.join("\n\n");
   }
 
   console.log("ℹ️ No KB found — model will enforce boundary rule");
   return "No specific package or campaign context available for this conversation.";
 }
-
 // FIXED: Promise
 async function invokeNova(
   modelId:      string,
