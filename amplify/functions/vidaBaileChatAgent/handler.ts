@@ -31,13 +31,14 @@ const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
 const SYSTEM_PROMPT =
   "You are the official customer service assistant for VidaBaile Dance Club.\n\n" +
   "CRITICAL LANGUAGE RULE:\n" +
-  "- Detect the language of the user's LATEST message (e.g., French, English, Spanish, Arabic).\n" +
-  "- Reply EXCLUSIVELY in that exact same language.\n" +
-  "- NEVER default to the language of the [CLUB & PACKAGE CONTEXT] or previous turns in the chat history.\n\n" +
+  "1. Analyze the exact language of the user's most recent message.\n" +
+  "2. You MUST reply EXCLUSIVELY in that exact same language. NEVER default to Spanish unless the user speaks Spanish first.\n\n" +
+  "BOOKING & ENROLLMENT RULE:\n" +
+  "If the user asks how to book, enroll, buy, or register for ANY class, DO NOT say you cannot process bookings. Instead, reply enthusiastically in their language, telling them to click the menu below to view all options and complete their enrollment. YOU MUST append this exact tag at the very end of your response: [TRIGGER_CATALOG]\n\n" +
   "KNOWLEDGE BOUNDARY RULES:\n" +
-  "1. Answer strictly using ONLY the [CLUB & PACKAGE CONTEXT] below. If information is not present, state politely that you don't have that detail.\n" +
-  "2. If the user asks for available packages or alternatives, list the packages found in [AVAILABLE PACKAGES DIRECTORY].\n" +
-  "3. Keep answers concise: 1 to 2 short sentences unless the user explicitly asks for a list.\n\n" +
+  "1. Answer strictly using ONLY the [CLUB & PACKAGE CONTEXT] below.\n" +
+  "2. If asked about options, list the packages from the [AVAILABLE PACKAGES DIRECTORY].\n" +
+  "3. Keep answers concise: 1 to 2 short sentences.\n\n" +
   "[CLUB & PACKAGE CONTEXT]\n{KNOWLEDGE_BASE_TEXT}";
 
 async function getMemberProfile(adminSub: string, phone: string) :Promise<{
@@ -113,134 +114,7 @@ async function getMemberProfile(adminSub: string, phone: string) :Promise<{
   }
 }
 
-// FIXED: Promise
-// FIXED: Promise and template literals
-// async function getKnowledgeBase(
-//   adminSub: string,
-//   campaignId: string | null | undefined,
-//   packageIntent: string | null | undefined,
-//   senderPhone: string
-// ): Promise<string> {
-//   console.log(`🔍 KB Lookup | campaignId: \({campaignId || "NULL"} | phone:\){senderPhone}`);
 
-//   // 1. Auto-recover campaignId if missing
-//   if (!campaignId) {
-//     try {
-//       const recentRes = await ddb.send(
-//         new QueryCommand({
-//           TableName: TABLE_NAME,
-//           KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-//           FilterExpression: "recipientPhone = :phone",
-//           ExpressionAttributeValues: {
-//             ":pk": { S: adminSub },
-//             ":prefix": { S: "BROADCAST#" },
-//             ":phone": { S: senderPhone } 
-//           }
-//         })
-//       );
-      
-//       const items = recentRes.Items || [];
-//       if (items.length > 0) {
-//         items.sort((a, b) => (b.createdAt?.S || "").localeCompare(a.createdAt?.S || ""));
-
-//         for (const item of items) {
-//           const skVal = item.sk?.S;
-//           if (!skVal) continue;
-//           const match = skVal.match(/^BROADCAST#([^#]+)#MEMBER#/);
-//           if (!match?.[1]) continue;
-//           const candidateId = match[1];
-
-//           let parentStatus: string | undefined;
-//           try {
-//             const parentRes = await ddb.send(
-//               new GetItemCommand({
-//                 TableName: TABLE_NAME,
-//                 Key: { pk: { S: adminSub }, sk: { S: `BROADCAST#${candidateId}` } },
-//               })
-//             );
-//             parentStatus = parentRes.Item?.broadcastStatus?.S;
-//           } catch { }
-
-//           if (parentStatus === "COMPLETED" && items.indexOf(item) < items.length - 1) {
-//             continue;
-//           }
-
-//           campaignId = candidateId;
-//           console.log(`🪄 Recovered campaignId: \({campaignId} (status=\){parentStatus ?? "none"})`);
-//           break;
-//         }
-//       }
-//     } catch (err: any) {
-//       console.warn(`⚠️ Auto-recovery failed: ${err.message}`);
-//     }
-//   }
-
-//   let combinedKb = "";
-
-//   // 2. Fetch Campaign Context AND Package Context
-//   if (campaignId) {
-//     try {
-//       const broadcastRes = await ddb.send(
-//         new GetItemCommand({
-//           TableName: TABLE_NAME,
-//           Key: { pk: { S: adminSub }, sk: { S: `BROADCAST#${campaignId}` } },
-//         })
-//       );
-
-//       const campaignKb = broadcastRes.Item?.campaignKnowledgeBase?.S;
-//       if (campaignKb) {
-//         console.log(`📚 Campaign KB loaded (${campaignId})`);
-//         combinedKb += `[CAMPAIGN INSTRUCTIONS]\n${campaignKb}\n\n`;
-//       }
-
-//       // Deep-fetch the linked CATALOG package details
-//       const packageRef = broadcastRes.Item?.packageIntent?.S || broadcastRes.Item?.packageRef?.S;
-//       if (packageRef) {
-//         const catalogSk = packageRef.startsWith("CATALOG#") ? packageRef : `CATALOG#${packageRef}`;
-//         const catalogRes = await ddb.send(
-//           new GetItemCommand({
-//             TableName: TABLE_NAME,
-//             Key: { pk: { S: adminSub }, sk: { S: catalogSk } },
-//           })
-//         );
-//         const packageKb = catalogRes.Item?.packageKnowledgeBase?.S;
-//         if (packageKb) {
-//           console.log(`📦 Catalog KB successfully loaded via ${catalogSk}`);
-//           combinedKb += `[PACKAGE DETAILS]\n${packageKb}\n\n`;
-//         }
-//       }
-//     } catch (err: any) {
-//       console.warn(`⚠️ KB fetch error: ${err.message}`);
-//     }
-//   }
-
-//   // 3. Fallback to direct package fetch if no campaign was found
-//   if (!campaignId && packageIntent) {
-//     try {
-//       const res = await ddb.send(
-//         new GetItemCommand({
-//           TableName: TABLE_NAME,
-//           Key: { pk: { S: adminSub }, sk: { S: `CATALOG#${packageIntent}` } },
-//         })
-//       );
-//       const packageKb = res.Item?.packageKnowledgeBase?.S;
-//       if (packageKb) {
-//         console.log(`📦 Package KB loaded directly (${packageIntent})`);
-//         combinedKb += `[PACKAGE DETAILS]\n${packageKb}\n\n`;
-//       }
-//     } catch (err: any) {
-//       console.warn(`⚠️ Package KB fetch error: ${err.message}`);
-//     }
-//   }
-
-//   // Return the combined knowledge base if anything was found
-//   if (combinedKb.trim()) {
-//     return combinedKb.trim();
-//   }
-
-//   console.log("ℹ️ No KB found — model will enforce boundary rule");
-//   return "No specific package or campaign context available for this conversation.";
-// }
 async function getKnowledgeBase(
   adminSub: string,
   campaignId: string | null | undefined,
@@ -477,7 +351,7 @@ export const handler = async (event: any) => {
       } = msg;
 
       const now = new Date().toISOString();
-      console.log(`📩 chatAgent record | adminSub=${adminSub ?? "MISSING"} | senderPhone=${senderPhone} | campaignId=${campaignId ?? "none"} | contextWamid=${contextWamid ?? "none"} | msgLen=${messageText?.length ?? 0}`);
+      console.log(`📩 chatAgent record | adminSub= ${adminSub ?? "MISSING"} | senderPhone=${senderPhone} | campaignId=${campaignId ?? "none"} | contextWamid=${contextWamid ?? "none"} | msgLen=${messageText?.length ?? 0}`);
 
       // ── GUARD: Ignore internal system labels (Flow completions) ──────
       if (messageText === "Interactive message" || messageText === "Button pressed" || messageText === "List choice") {
@@ -582,20 +456,58 @@ export const handler = async (event: any) => {
         }
       }
       assistantReply = assistantReply.trim() || "We will get back to you shortly.";
-      console.log(`💬 Reply generated (${assistantReply.length} chars)`);
+      
+      // ── 1. Check if the AI decided to trigger the catalog ─────────────────
+      let isCatalogTrigger = false;
+      if (assistantReply.includes("[TRIGGER_CATALOG]")) {
+        isCatalogTrigger = true;
+        // Strip the hidden tag so the user doesn't see it
+        assistantReply = assistantReply.replace("[TRIGGER_CATALOG]", "").trim();
+      }
+
+      console.log(`💬 Reply generated (${assistantReply.length} chars) | isCatalogTrigger:${isCatalogTrigger}`);
 
       const chunks = assistantReply.split(/\n\n+/).map(c => c.trim()).filter(Boolean);
+      
       for (let i = 0; i < chunks.length; i++) {
-        const payload: any = {
-          messaging_product: "whatsapp",
-          recipient_type:    "individual",
-          to:                senderPhone.replace(/^\+/, ""), // FIXED: Stripped +
-          type:              "text",
-          text:              { body: chunks[i] },
-        };
+        let payload: any;
+
+        // ── 2. Send Interactive Button if triggered, otherwise standard text ──
+        if (isCatalogTrigger && i === chunks.length - 1) {
+          payload = {
+            messaging_product: "whatsapp",
+            recipient_type: "individual",
+            to: senderPhone.replace(/^\+/, ""),
+            type: "interactive",
+            interactive: {
+              type: "button",
+              body: { text: chunks[i] || "Click below to discover our packages and enroll:" },
+              action: {
+                buttons: [
+                  {
+                    type: "reply",
+                    reply: {
+                      id: "BTN_DISCOVER_PACKAGES", // Webhook will catch this ID
+                      title: "Discover Packages"
+                    }
+                  }
+                ]
+              }
+            }
+          };
+        } else {
+          payload = {
+            messaging_product: "whatsapp",
+            recipient_type:    "individual",
+            to:                senderPhone.replace(/^\+/, ""),
+            type:              "text",
+            text:              { body: chunks[i] },
+          };
+        }
+
         if (contextWamid && i === 0) payload.context = { message_id: contextWamid };
 
-        console.log(`📲 WhatsApp send attempt | to=${payload.to} | chunk=${i+1}/${chunks.length} | phoneId=${WHATSAPP_PHONE_ID}`);
+        console.log(`📲 WhatsApp send attempt | to=${payload.to} | chunk=\){i+1}/${chunks.length} | phoneId=${WHATSAPP_PHONE_ID}`);
         const res = await fetch(
           `https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_ID}/messages`,
           {
@@ -609,7 +521,7 @@ export const handler = async (event: any) => {
         );
         if (!res.ok) {
           const err = await res.json();
-          console.error(`❌ WhatsApp send failed (chunk ${i}) | to=${payload.to} | status=${res.status}:`, err);
+          console.error(`❌ WhatsApp send failed (chunk ${i}) | to=\){payload.to} | status=${res.status}:`, err);
           break;
         }
         console.log(`✅ WhatsApp chunk ${i+1} sent`);
@@ -619,6 +531,11 @@ export const handler = async (event: any) => {
       const analysis = await analyseMessage(messageText);
       if (analysis) {
         console.log(`📊 Analysis : sentiment=${analysis.sentiment}`);
+      }
+
+      // Re-append the secret tag before saving to history so the AI remembers it offered the catalog
+      if (isCatalogTrigger) {
+          assistantReply += " [TRIGGER_CATALOG]";
       }
 
       const assistantTurn = { role: "assistant", content: [{ text: assistantReply }] };
