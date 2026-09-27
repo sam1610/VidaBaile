@@ -247,7 +247,7 @@ async function getKnowledgeBase(
   packageIntent: string | null | undefined,
   senderPhone: string
 ): Promise<string> {
-  console.log(`🔍 KB Lookup | campaignId: \({campaignId || "NULL"} | phone:\){senderPhone}`);
+  console.log(`🔍 KB Lookup | campaignId: ${campaignId} || "NULL"} | phone:${senderPhone}`);
 
   const sections: string[] = [];
 
@@ -289,7 +289,7 @@ async function getKnowledgeBase(
         const desc = item.packageKnowledgeBase?.S ? ` - ${item.packageKnowledgeBase.S.substring(0, 100)}...` : "";
         
         // FIXED: Restored proper ${} template literal syntax so variables are read correctly
-        return `• \({title} (\)\({price} |\){credits})${desc}`;
+        return `• ${title}  (BD ${price} | ${credits}) ${desc}`;
       });
 
     if (activePackages.length > 0) {
@@ -342,7 +342,7 @@ async function getKnowledgeBase(
           }
 
           campaignId = candidateId;
-          console.log(`🪄 Recovered campaignId: \({campaignId} (status=\){parentStatus ?? "none"})`);
+          console.log(`🪄 Recovered campaignId: ${campaignId} (status=${parentStatus ?? "none"})`);
           break;
         }
       }
@@ -505,7 +505,7 @@ export const handler = async (event: any) => {
             if (skMatch && skMatch[1]) {
               campaignId = skMatch[1];
             }
-            console.log(`✅ Dynamically resolved adminSub: \({adminSub}, campaignId:\){campaignId}`);
+            console.log(`✅ Dynamically resolved adminSub: ${adminSub}, campaignId:${campaignId}`);
           }
         } catch (err: any) {
           console.warn(`⚠️ Failed to resolve contextWamid: ${err.message}`);
