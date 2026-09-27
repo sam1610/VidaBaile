@@ -160,11 +160,11 @@ async function getKnowledgeBase(
         const title = item.name?.S || item.packageType?.S || item.sk?.S?.replace("CATALOG#", "") || "Package";
         const price = item.price?.N ?? item.price?.S ?? "Contact for price";
         const credits = item.totalCredits?.N ? `${item.totalCredits.N} credits` : "Subscription";
-        const fullDesc = item.packageKnowledgeBase?.S || "";
-        // Match everything up to and including the first period, exclamation, or question mark
-        const firstSentenceMatch = fullDesc.match(/^[^.!?]+[.!?]/);
-        // Fallback to the first line if no punctuation is found
-        const conciseDesc = firstSentenceMatch ? firstSentenceMatch[0].trim() : fullDesc.split('\n')[0].trim();
+        
+        // Split into lines, keep lines longer than 10 characters, and ignore any line starting with a number and period (e.g. "1. ")
+        const lines = (item.packageKnowledgeBase?.S || "").split('\n').filter(l => l.trim().length > 10);
+        const firstMeaningfulLine = lines.find(l => !/^[0-9]+\./.test(l.trim())) || lines[0] || "";
+        const conciseDesc = firstMeaningfulLine.length > 120 ? firstMeaningfulLine.substring(0, 120) + "..." : firstMeaningfulLine;
         
         const desc = conciseDesc ? ` - ${conciseDesc}` : "";
         
@@ -470,8 +470,23 @@ export const handler = async (event: any) => {
       }
 
       if (isCatalogTrigger) {
-        console.log(`🎯 Booking intent detected. Sending Meta Flow message.`);
+        console.log(`🎯 Booking intent detected. Fetching catalog to pre-fill Meta Flow.`);
         
+        // Fetch the catalog directly so Meta doesn't have to trigger an INIT request
+        const catalogRes = await ddb.send(new QueryCommand({
+          TableName: TABLE_NAME,
+          KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+          ExpressionAttributeValues: { ":pk": { S: adminSub }, ":prefix": { S: "CATALOG#" } }
+        }));
+
+        const packages_list = (catalogRes.Items || [])
+          .filter(item => (item.status?.S || "ACTIVE") === "ACTIVE")
+          .map(item => ({
+            id: (item.sk?.S || "").replace("CATALOG#", ""),
+            title: item.name?.S || item.packageType?.S || "Dance Package",
+            description: `Price: ${item.price?.N ?? item.price?.S ?? "Contact for price"} BHD.`
+          }));
+
         const payload: any = {
           messaging_product: "whatsapp",
           recipient_type: "individual",
@@ -479,27 +494,23 @@ export const handler = async (event: any) => {
           type: "interactive",
           interactive: {
             type: "flow",
-            header: {
-              type: "text",
-              text: "La Vida Dance Club"
-            },
-            body: {
-              text: "Discover our dance sessions and complete your enrollment below."
-            },
-            footer: {
-              text: "@LaVidaDance"
-            },
+            header: { type: "text", text: "La Vida Dance Club" },
+            body: { text: "Discover our dance sessions and complete your enrollment below." },
+            footer: { text: "@LaVidaDance" },
             action: {
               name: "flow",
               parameters: {
                 flow_message_version: "3",
-                // Pass both adminSub and phone number as a base64 JSON object
+                // Embed adminSub and phone for standalone booking persistence
                 flow_token: Buffer.from(JSON.stringify({ adminSub, phone: senderPhone })).toString("base64"), 
                 flow_id: "2184446669618705",
                 flow_cta: "Our Packages",
                 flow_action: "navigate",
                 flow_action_payload: {
-                  screen: "Packages_Screen"
+                  screen: "Packages_Screen",
+                  data: {
+                    packages_list: packages_list // Inject the data directly into the screen
+                  }
                 }
               }
             }
@@ -518,8 +529,8 @@ export const handler = async (event: any) => {
           body: JSON.stringify(payload),
         });
 
-        const flowData = await flowRes.json();
         if (!flowRes.ok) {
+          const flowData = await flowRes.json();
           console.error(`❌ Meta Flow send failed:`, JSON.stringify(flowData));
         } else {
           console.log(`✅ Meta Flow message sent successfully!`);
