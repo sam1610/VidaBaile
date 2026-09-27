@@ -69,48 +69,7 @@ function resolveBroadcastId(decryptedData: any): string | null {
 // ────────────────────────────────────────────────────────────────────────────
 // 3. Data Fetching Helpers
 // ────────────────────────────────────────────────────────────────────────────
-// async function fetchActivePackages(adminSub: string) {
-//   // Get today's date in YYYY-MM-DD format to match your DynamoDB records
-//   const today = new Date().toISOString().split("T")[0]; 
 
-//   const res = await ddb.send(new QueryCommand({
-//     TableName: TABLE_NAME,
-//     KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-//     ExpressionAttributeValues: {
-//       ":pk": { S: adminSub },
-//       ":prefix": { S: "BROADCAST#" } // Target broadcast items
-//     }
-//   }));
-  
-//   const items = res.Items || [];
-  
-//   // 1. Filter out expired or future broadcasts
-//   // 2. Map to the Flow UI Schema
-//   return items.filter(item => {
-//     const validFrom = item.validFrom?.S;
-//     const validUntil = item.validUntil?.S;
-    
-//     // Only include broadcasts where today falls within the valid range
-//     if (validFrom && validUntil) {
-//       return validFrom <= today && validUntil >= today;
-//     }
-//     return false;
-//   }).map(item => {
-//     // Use broadcast ID as the unique RadioButtonsGroup id (avoids duplicate id when
-//     // multiple broadcasts reference the same catalog package).
-//     // Encode catalog packageId into the id so FETCH_PACKAGE_DETAILS can resolve it.
-//     // Format: "<broadcastId>|<catalogPackageId>"
-//     const broadcastId = (item.sk?.S || "").replace("BROADCAST#", "");
-//     const catalogPackageId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
-//     return {
-//       id:          `${broadcastId}|${catalogPackageId}`,
-//       title:       item.name?.S || "Dance Package",
-//       description: item.promotionalContent?.S
-//         ? item.promotionalContent.S.substring(0, 60)
-//         : "Exclusive dance offer",
-//     };
-//   });
-// }
 async function fetchActivePackages(adminSub: string, broadcastId: string | null) {
   const today = new Date().toISOString().split("T")[0]; 
 
@@ -280,18 +239,61 @@ export const handler = async (event: any) => {
         responseData = { packages_list: activePackages };
       }
       // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
+      // else if (payload.action === "FINALIZE_SUBMISSION" || payload.consent_given) {
+      //   console.log(`🎯 FINALIZE_SUBMISSION: package=${payload.package_id}, date=${payload.date}, time=${payload.time}`);
+      //   const timestamp = new Date().toISOString();
+
+      //   // ── Persist booking record — wrapped so a DynamoDB failure NEVER blocks Terminal_Success ──
+      //   try {
+      //     const broadcastId = resolveBroadcastId(decryptedData);
+      //     if (broadcastId) {
+      //       const recipientPhone = await findReceiptPhone(adminSub, broadcastId);
+      //       if (recipientPhone) {
+      //         const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
+      //         console.log(`✅ Confirming booking on receipt: ${receiptSk}`);
+      //         await ddb.send(new UpdateItemCommand({
+      //           TableName: TABLE_NAME,
+      //           Key: { pk: { S: adminSub }, sk: { S: receiptSk } },
+      //           UpdateExpression:
+      //             "SET memberBookingStatus = :status, packageId = :pkgId, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
+      //           ExpressionAttributeValues: {
+      //             ":status": { S: "BOOKED" },
+      //             ":pkgId":  { S: payload.package_id || "UNKNOWN" },
+      //             ":date":   { S: payload.date   || "" },
+      //             ":time":   { S: payload.time   || "" },
+      //             ":ts":     { S: timestamp },
+      //           },
+      //         }));
+      //         console.log(`📝 Booking persisted for ${recipientPhone}`);
+      //       } else {
+      //         console.warn(`⚠️ No receipt found for broadcastId: ${broadcastId} — Terminal_Success still shown`);
+      //       }
+      //     } else {
+      //       console.warn(`⚠️ Could not parse broadcastId from flow_token: ${decryptedData?.flow_token} — Terminal_Success still shown`);
+      //     }
+      //   } catch (dbErr: any) {
+      //     // Non-blocking: log the persistence failure but always show Terminal_Success to the user.
+      //     // The booking can be reconciled later via CloudWatch logs.
+      //     console.error(`❌ FINALIZE_SUBMISSION DynamoDB write failed (non-blocking): ${dbErr.message}`);
+      //   }
+
+      //   // Always navigate to Terminal_Success — DynamoDB failure above must not block this
+      //   responseScreen = "Terminal_Success";
+      //   responseData = {};
+      // }
+      // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
       else if (payload.action === "FINALIZE_SUBMISSION" || payload.consent_given) {
         console.log(`🎯 FINALIZE_SUBMISSION: package=${payload.package_id}, date=${payload.date}, time=${payload.time}`);
         const timestamp = new Date().toISOString();
 
-        // ── Persist booking record — wrapped so a DynamoDB failure NEVER blocks Terminal_Success ──
         try {
           const broadcastId = resolveBroadcastId(decryptedData);
+
           if (broadcastId) {
+            // ── SCENARIO A: Update Existing Broadcast Receipt ──
             const recipientPhone = await findReceiptPhone(adminSub, broadcastId);
             if (recipientPhone) {
               const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
-              console.log(`✅ Confirming booking on receipt: ${receiptSk}`);
               await ddb.send(new UpdateItemCommand({
                 TableName: TABLE_NAME,
                 Key: { pk: { S: adminSub }, sk: { S: receiptSk } },
@@ -305,20 +307,55 @@ export const handler = async (event: any) => {
                   ":ts":     { S: timestamp },
                 },
               }));
-              console.log(`📝 Booking persisted for ${recipientPhone}`);
-            } else {
-              console.warn(`⚠️ No receipt found for broadcastId: ${broadcastId} — Terminal_Success still shown`);
+              console.log(`📝 Updated Broadcast Receipt for scheduling: ${receiptSk}`);
             }
           } else {
-            console.warn(`⚠️ Could not parse broadcastId from flow_token: ${decryptedData?.flow_token} — Terminal_Success still shown`);
+            // ── SCENARIO B: Create New Direct Catalog Booking ──
+            let memberPhone = "UNKNOWN_PHONE";
+            if (decryptedData?.flow_token) {
+               try {
+                 // Decode the base64 JSON token passed by the Chat Agent
+                 const decoded = JSON.parse(Buffer.from(decryptedData.flow_token, "base64").toString("utf8"));
+                 if (decoded.phone) memberPhone = decoded.phone;
+               } catch (e) {
+                 console.warn("Could not decode phone from chat token.");
+               }
+            }
+
+            const bookingId = crypto.randomUUID();
+            // Using your schema's required composite SK pattern: BOOKING##MEMBER#
+            const bookingSk = `BOOKING#${bookingId}#MEMBER#${memberPhone}`; 
+
+            await ddb.send(new UpdateItemCommand({
+              TableName: TABLE_NAME,
+              Key: { pk: { S: adminSub }, sk: { S: bookingSk } },
+              // Using SET so it creates a new item if it doesn't exist
+              UpdateExpression:
+                "SET entityType = :type, phone = :phone, packageId = :pkgId, #dateAttr = :date, startTime = :time, #statusAttr = :status, bookedAt = :ts, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk",
+              ExpressionAttributeNames: {
+                "#dateAttr": "date",     // 'date' is a reserved word in DynamoDB
+                "#statusAttr": "status"  // 'status' is a reserved word in DynamoDB
+              },
+              ExpressionAttributeValues: {
+                ":type":   { S: "BOOKING" },
+                ":phone":  { S: memberPhone },
+                ":pkgId":  { S: payload.package_id || "UNKNOWN" },
+                ":date":   { S: payload.date   || "" },
+                ":time":   { S: payload.time   || "" },
+                ":status": { S: "CONFIRMED" },
+                ":ts":     { S: timestamp },
+                // Populate GSI1 so you can easily query all bookings for the Timetable Agent
+                ":gsi1pk": { S: `${adminSub}#BOOKINGS` }, 
+                ":gsi1sk": { S: `DATETIME#${payload.date}T${payload.time}:00` } 
+              },
+            }));
+            console.log(`✅ Created Direct Booking for scheduling: ${bookingSk}`);
           }
         } catch (dbErr: any) {
-          // Non-blocking: log the persistence failure but always show Terminal_Success to the user.
-          // The booking can be reconciled later via CloudWatch logs.
-          console.error(`❌ FINALIZE_SUBMISSION DynamoDB write failed (non-blocking): ${dbErr.message}`);
+          console.error(`❌ FINALIZE_SUBMISSION DynamoDB write failed: ${dbErr.message}`);
         }
 
-        // Always navigate to Terminal_Success — DynamoDB failure above must not block this
+        // Always navigate to Terminal_Success
         responseScreen = "Terminal_Success";
         responseData = {};
       }
