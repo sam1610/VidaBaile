@@ -309,6 +309,7 @@ export const AppointmentsTab = () => {
         onSave={handleSaveCoach}
         onDelete={handleDeleteCoach}
         error={saveError}
+        adminSub={adminSub}
       />
     </div>
   );

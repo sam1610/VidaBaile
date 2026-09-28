@@ -229,3 +229,141 @@ input[aria-invalid="true"] {
   border-color: #c62828 !important;
   background-color: #ffebee;
 }
+
+/* ── Manage Unavailability section ──────────────────────────────────────── */
+
+.unavail-section {
+  border-top: 1px solid #e0e0e0;
+  margin-top: 20px;
+  padding-top: 16px;
+}
+
+.unavail-title {
+  font-size: 13px;
+  font-weight: 700;
+  color: #333;
+  margin: 0 0 12px;
+}
+
+.unavail-filter {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+
+.unavail-filter-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: #666;
+  white-space: nowrap;
+}
+
+.unavail-filter-sep {
+  font-size: 12px;
+  color: #999;
+}
+
+.unavail-date-input {
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  flex: 1;
+  min-width: 120px;
+}
+
+.unavail-date-input:focus {
+  outline: none;
+  border-color: #0066cc;
+  box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+}
+
+.unavail-loading,
+.unavail-empty {
+  font-size: 12px;
+  color: #999;
+  margin: 8px 0;
+}
+
+.unavail-list {
+  list-style: none;
+  margin: 0 0 12px;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.unavail-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: #f9f9f9;
+  border: 1px solid #e8e8e8;
+  border-radius: 4px;
+  padding: 8px 10px;
+  flex-wrap: wrap;
+}
+
+.unavail-item-times {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1;
+  min-width: 0;
+}
+
+.unavail-item-start,
+.unavail-item-end {
+  font-size: 12px;
+  color: #333;
+  white-space: nowrap;
+}
+
+.unavail-item-arrow {
+  font-size: 12px;
+  color: #999;
+}
+
+.unavail-item-reason {
+  font-size: 11px;
+  color: #666;
+  font-style: italic;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 140px;
+}
+
+.unavail-delete-btn {
+  padding: 4px 8px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+
+.unavail-add-btn {
+  margin-top: 4px;
+  font-size: 12px;
+  padding: 6px 12px;
+}
+
+.unavail-add-form {
+  background: #f5f7fa;
+  border: 1px solid #dde1e7;
+  border-radius: 6px;
+  padding: 12px;
+  margin-top: 8px;
+}
+
+.unavail-add-form .form-group {
+  margin-bottom: 10px;
+}
+
+.unavail-add-form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 4px;
+}
