@@ -22,11 +22,22 @@ function thirtyDaysFromNow(): string {
   return toDateString(d);
 }
 
-function formatDateTime(iso: string): string {
+function formatDateTimeRange(isoStart: string, isoEnd: string): string {
   try {
-    return new Date(iso).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+    const start = new Date(isoStart);
+    const end   = new Date(isoEnd);
+    const dateFmt: Intl.DateTimeFormatOptions = { day: '2-digit', month: '2-digit', year: 'numeric' };
+    const timeFmt: Intl.DateTimeFormatOptions = { hour: '2-digit', minute: '2-digit' };
+    const startDate = start.toLocaleDateString(undefined, dateFmt);
+    const startTime = start.toLocaleTimeString(undefined, timeFmt);
+    const endDate   = end.toLocaleDateString(undefined, dateFmt);
+    const endTime   = end.toLocaleTimeString(undefined, timeFmt);
+    if (startDate === endDate) {
+      return `${startDate}  ${startTime} \u2192 ${endTime}`;
+    }
+    return `${startDate} ${startTime} \u2192 ${endDate} ${endTime}`;
   } catch {
-    return iso;
+    return `${isoStart} \u2192 ${isoEnd}`;
   }
 }
 
@@ -34,7 +45,7 @@ function formatDateTime(iso: string): string {
 
 interface UnavailBlock {
   sk: string;
-  gsi1sk: string;
+  startDateTime: string;
   endDateTime: string;
   reason: string;
 }
@@ -63,8 +74,11 @@ export interface CoachCrudModalProps {
  * STD key shapes:
  *   COACH record:       pk=adminSub, sk=COACH#<phone>
  *   UNAVAILABILITY:     pk=adminSub, sk=UNAVAIL#<phone>#<isoStart>
- *                       gsi1pk=adminSub#UNAVAIL#<phone>
+ *                       gsi1pk=<adminSub>#UNAVAIL#<phone>
  *                       gsi1sk=DATETIME#<isoStart>
+ *                       startDateTime=<isoStart>   (explicit field, avoids parsing gsi1sk)
+ *                       endDateTime=<isoEnd>        (full ISO — not endTime which is AWSTime only)
+ *                       reason=<text>               (absence justification)
  *
  * The unavailability section only renders in edit mode (coach !== null).
  */
@@ -92,6 +106,7 @@ export const CoachCrudModal = ({
   const [filterEnd, setFilterEnd]               = useState(thirtyDaysFromNow);
   const [unavailabilities, setUnavailabilities] = useState<UnavailBlock[]>([]);
   const [loadingUnavail, setLoadingUnavail]     = useState(false);
+  const [savingBlock, setSavingBlock]           = useState(false);
   const [isAddingUnavail, setIsAddingUnavail]   = useState(false);
   const [newBlock, setNewBlock]                 = useState<NewBlock>({ start: '', end: '', reason: '' });
 
@@ -134,25 +149,36 @@ export const CoachCrudModal = ({
     setLoadingUnavail(true);
     try {
       const client = generateClient<Schema>();
-      const gsi1pk = adminSub + '#UNAVAIL#' + coach.phone;
-      const skLow  = 'DATETIME#' + filterStart + 'T00:00:00.000Z';
-      const skHigh = 'DATETIME#' + filterEnd   + 'T23:59:59.999Z';
-      const { data, errors } = await (client.models as any).ClubRecord.listByGsi1({
+      const gsi1pk = `${adminSub}#UNAVAIL#${coach.phone}`;
+      const skLow  = `DATETIME#${filterStart}T00:00:00.000Z`;
+      const skHigh = `DATETIME#${filterEnd}T23:59:59.999Z`;
+
+      const { data: records, errors } = await (client.models as any).ClubRecord.listByGsi1({
         gsi1pk,
         gsi1sk: { between: [skLow, skHigh] },
       });
-      if (errors?.length) console.error('[CoachCrudModal] fetchUnavailabilities errors:', errors);
-      const blocks: UnavailBlock[] = ((data as any[]) ?? [])
+
+      if (errors?.length) {
+        console.error('[CoachCrudModal] fetchUnavailabilities errors:', errors);
+        setError(`Failed to load absences: ${errors[0]?.message ?? 'unknown error'}`);
+        setUnavailabilities([]);
+        return;
+      }
+
+      const blocks: UnavailBlock[] = ((records as any[]) ?? [])
         .map((item: any) => ({
-          sk:      item.sk      ?? '',
-          gsi1sk:  item.gsi1sk  ?? '',
-          endDateTime: item.endDateTime ?? '',
-          reason:  item.reason  ?? '',
+          sk:            item.sk            ?? '',
+          // Prefer explicit startDateTime; fall back to deriving from gsi1sk
+          startDateTime: item.startDateTime ?? item.gsi1sk?.replace('DATETIME#', '') ?? '',
+          endDateTime:   item.endDateTime   ?? '',
+          reason:        item.reason        ?? '',
         }))
-        .sort((a, b) => a.gsi1sk.localeCompare(b.gsi1sk));
+        .sort((a, b) => a.startDateTime.localeCompare(b.startDateTime));
+
       setUnavailabilities(blocks);
     } catch (err) {
       console.error('[CoachCrudModal] fetchUnavailabilities failed:', err);
+      setError(err instanceof Error ? err.message : 'Failed to load absences');
     } finally {
       setLoadingUnavail(false);
     }
@@ -164,25 +190,44 @@ export const CoachCrudModal = ({
       setError('Start and end times are required for the absence block.');
       return;
     }
-    const isoStart = new Date(newBlock.start).toISOString();
-    const isoEnd   = new Date(newBlock.end).toISOString();
+    setSavingBlock(true);
+    setError(null);
     try {
+      const isoStart = new Date(newBlock.start).toISOString();
+      const isoEnd   = new Date(newBlock.end).toISOString();
+
+      if (isoEnd <= isoStart) {
+        setError('End time must be after start time.');
+        return;
+      }
+
       const client = generateClient<Schema>();
-      await (client.models as any).ClubRecord.create({
-        pk:         adminSub,
-        sk:         'UNAVAIL#' + coach.phone + '#' + isoStart,
-        entityType: 'COACH_UNAVAILABILITY',
-        gsi1pk:     adminSub + '#UNAVAIL#' + coach.phone,
-        gsi1sk:     'DATETIME#' + isoStart,
-        endDateTime:    isoEnd,
-        reason:     newBlock.reason,
+      const { errors } = await (client.models as any).ClubRecord.create({
+        pk:            adminSub,
+        sk:            `UNAVAIL#${coach.phone}#${isoStart}`,
+        entityType:    'COACH_UNAVAILABILITY',
+        gsi1pk:        `${adminSub}#UNAVAIL#${coach.phone}`,
+        gsi1sk:        `DATETIME#${isoStart}`,
+        startDateTime: isoStart,
+        endDateTime:   isoEnd,
+        reason:        newBlock.reason.trim() || undefined,
       });
+
+      if (errors?.length) {
+        const msg = errors.map((e: any) => e.message).join('; ');
+        console.error('[CoachCrudModal] handleSaveNewBlock errors:', errors);
+        setError(`Failed to save absence: ${msg}`);
+        return;
+      }
+
       setNewBlock({ start: '', end: '', reason: '' });
       setIsAddingUnavail(false);
       await fetchUnavailabilities();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save absence block');
       console.error('[CoachCrudModal] handleSaveNewBlock failed:', err);
+    } finally {
+      setSavingBlock(false);
     }
   }
 
@@ -191,7 +236,11 @@ export const CoachCrudModal = ({
     if (!window.confirm('Delete this absence block?')) return;
     try {
       const client = generateClient<Schema>();
-      await (client.models as any).ClubRecord.delete({ pk: adminSub, sk });
+      const { errors } = await (client.models as any).ClubRecord.delete({ pk: adminSub, sk });
+      if (errors?.length) {
+        setError(`Failed to delete absence: ${errors[0]?.message ?? 'unknown error'}`);
+        return;
+      }
       await fetchUnavailabilities();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to delete absence block');
@@ -270,7 +319,7 @@ export const CoachCrudModal = ({
 
         <div className="modal-header">
           <h2>{title}</h2>
-          <button className="modal-close-btn" onClick={handleClose} aria-label="Close">✕</button>
+          <button className="modal-close-btn" onClick={handleClose} aria-label="Close">\u2715</button>
         </div>
 
         {error && <div className="modal-error-banner">{error}</div>}
@@ -376,36 +425,42 @@ export const CoachCrudModal = ({
                 />
               </div>
 
-              {/* Absence list */}
+              {/* Absence table */}
               {loadingUnavail ? (
-                <p className="unavail-loading">Loading absences…</p>
+                <p className="unavail-loading">Loading absences\u2026</p>
               ) : unavailabilities.length === 0 ? (
                 <p className="unavail-empty">No absences in this date range.</p>
               ) : (
-                <ul className="unavail-list">
-                  {unavailabilities.map((block) => {
-                    const isoStart = block.gsi1sk.replace('DATETIME#', '');
-                    return (
-                      <li key={block.sk} className="unavail-item">
-                        <div className="unavail-item-times">
-                          <span className="unavail-item-start">{formatDateTime(isoStart)}</span>
-                          <span className="unavail-item-arrow">&rarr;</span>
-                          <span className="unavail-item-end">{formatDateTime(block.endDateTime)}</span>
-                        </div>
-                        {block.reason && (
-                          <span className="unavail-item-reason">{block.reason}</span>
-                        )}
-                        <button
-                          className="btn btn-danger unavail-delete-btn"
-                          onClick={() => handleDeleteBlock(block.sk)}
-                          aria-label="Delete absence block"
-                        >
-                          Delete
-                        </button>
-                      </li>
-                    );
-                  })}
-                </ul>
+                <table className="unavail-table" aria-label="Absence blocks">
+                  <thead>
+                    <tr>
+                      <th>Interval</th>
+                      <th>Reason</th>
+                      <th aria-label="Actions"></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {unavailabilities.map((block) => (
+                      <tr key={block.sk}>
+                        <td className="unavail-col-interval">
+                          {formatDateTimeRange(block.startDateTime, block.endDateTime)}
+                        </td>
+                        <td className="unavail-col-reason">
+                          {block.reason || <span className="unavail-no-reason">\u2014</span>}
+                        </td>
+                        <td className="unavail-col-actions">
+                          <button
+                            className="btn btn-danger btn-sm"
+                            onClick={() => handleDeleteBlock(block.sk)}
+                            aria-label="Delete absence block"
+                          >
+                            Delete
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
               )}
 
               {/* Add absence inline form */}
@@ -426,6 +481,7 @@ export const CoachCrudModal = ({
                         type="datetime-local"
                         value={newBlock.start}
                         onChange={(e) => setNewBlock((p) => ({ ...p, start: e.target.value }))}
+                        disabled={savingBlock}
                       />
                     </div>
                     <div className="form-group">
@@ -436,6 +492,7 @@ export const CoachCrudModal = ({
                         value={newBlock.end}
                         min={newBlock.start}
                         onChange={(e) => setNewBlock((p) => ({ ...p, end: e.target.value }))}
+                        disabled={savingBlock}
                       />
                     </div>
                   </div>
@@ -446,12 +503,17 @@ export const CoachCrudModal = ({
                       type="text"
                       value={newBlock.reason}
                       onChange={(e) => setNewBlock((p) => ({ ...p, reason: e.target.value }))}
-                      placeholder="e.g., Personal leave"
+                      placeholder="e.g., travelling, personal leave"
+                      disabled={savingBlock}
                     />
                   </div>
                   <div className="unavail-add-form-actions">
-                    <button className="btn btn-primary" onClick={handleSaveNewBlock}>
-                      Save Block
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleSaveNewBlock}
+                      disabled={savingBlock}
+                    >
+                      {savingBlock ? 'Saving\u2026' : 'Save Block'}
                     </button>
                     <button
                       className="btn btn-secondary"
@@ -459,6 +521,7 @@ export const CoachCrudModal = ({
                         setIsAddingUnavail(false);
                         setNewBlock({ start: '', end: '', reason: '' });
                       }}
+                      disabled={savingBlock}
                     >
                       Cancel
                     </button>

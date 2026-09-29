@@ -394,3 +394,63 @@ input[aria-invalid="true"] {
   flex: 1;
   min-width: 0;
 }
+
+/* ── Unavailability table ───────────────────────────────────────────────── */
+
+.unavail-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  margin-bottom: 12px;
+}
+
+.unavail-table thead tr {
+  background: #f5f7fa;
+}
+
+.unavail-table th {
+  text-align: left;
+  padding: 6px 8px;
+  font-weight: 600;
+  color: #555;
+  border-bottom: 1px solid #dde1e7;
+}
+
+.unavail-table td {
+  padding: 6px 8px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: middle;
+}
+
+.unavail-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.unavail-table tbody tr:hover {
+  background: #fafbfc;
+}
+
+.unavail-col-interval {
+  white-space: nowrap;
+  color: #333;
+  font-variant-numeric: tabular-nums;
+}
+
+.unavail-col-reason {
+  color: #555;
+}
+
+.unavail-no-reason {
+  color: #bbb;
+}
+
+.unavail-col-actions {
+  width: 1%;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.btn-sm {
+  padding: 3px 8px;
+  font-size: 11px;
+}
