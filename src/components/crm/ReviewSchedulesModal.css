@@ -1,0 +1,302 @@
+/* ── ReviewSchedulesModal — imports base modal classes from the project ─────
+   Base rules (modal-overlay, modal-content, modal-header, modal-close-btn,
+   modal-error-banner, modal-body, modal-footer, .btn, .btn-primary,
+   .btn-secondary) are intentionally duplicated here so this component is
+   self-contained and works without a global CSS import.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* ── Base modal shell ───────────────────────────────────────────────────── */
+
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+  animation: rsFadeIn 0.15s ease-out;
+}
+
+@keyframes rsFadeIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+/* Wide override — overrides the 500px default used by narrow modals */
+.rs-modal {
+  background: #fff;
+  border-radius: 8px;
+  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.15);
+  width: min(92vw, 1100px);   /* up to 1100px, never wider than 92% viewport */
+  max-height: 90vh;
+  display: flex;
+  flex-direction: column;
+  animation: rsSlideUp 0.2s ease-out;
+}
+
+@keyframes rsSlideUp {
+  from { transform: translateY(20px); opacity: 0; }
+  to   { transform: translateY(0);    opacity: 1; }
+}
+
+.modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 18px 20px;
+  border-bottom: 1px solid #e0e0e0;
+  flex-shrink: 0;
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #1a1a1a;
+}
+
+.modal-close-btn {
+  background: none;
+  border: none;
+  font-size: 20px;
+  cursor: pointer;
+  color: #999;
+  padding: 0;
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px;
+  transition: background-color 0.15s, color 0.15s;
+}
+
+.modal-close-btn:hover {
+  background-color: #f0f0f0;
+  color: #333;
+}
+
+.modal-error-banner {
+  background: #ffebee;
+  border-bottom: 1px solid #ffcdd2;
+  color: #c62828;
+  padding: 10px 20px;
+  font-size: 12px;
+  font-weight: 500;
+  flex-shrink: 0;
+}
+
+.modal-footer {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 20px;
+  border-top: 1px solid #e0e0e0;
+  background: #f9f9f9;
+  flex-shrink: 0;
+}
+
+.btn {
+  padding: 7px 16px;
+  border: none;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-primary {
+  background: #0066cc;
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #0052a3;
+  box-shadow: 0 2px 8px rgba(0, 102, 204, 0.3);
+}
+
+.btn-secondary {
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #ddd;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e8e8e8;
+}
+
+/* ── Body ───────────────────────────────────────────────────────────────── */
+
+.rs-body {
+  padding: 0;
+  overflow-y: auto;
+  flex: 1;
+}
+
+/* ── Empty / Loading state ──────────────────────────────────────────────── */
+
+.rs-state-msg {
+  padding: 32px 24px;
+  font-size: 13px;
+  color: #999;
+  text-align: center;
+}
+
+.rs-empty {
+  color: #27ae60;
+  font-weight: 500;
+}
+
+/* ── Table wrapper (horizontal scroll on small screens) ─────────────────── */
+
+.rs-table-wrapper {
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* ── Table ──────────────────────────────────────────────────────────────── */
+
+.rs-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12.5px;
+}
+
+.rs-table thead tr {
+  background: #f5f7fa;
+  position: sticky;
+  top: 0;
+  z-index: 1;
+}
+
+.rs-table th {
+  text-align: left;
+  padding: 10px 14px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #555;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  border-bottom: 2px solid #e0e0e0;
+  white-space: nowrap;
+}
+
+.rs-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid #f0f0f0;
+  vertical-align: middle;
+  color: #333;
+}
+
+.rs-table tbody tr:last-child td {
+  border-bottom: none;
+}
+
+.rs-table tbody tr:hover {
+  background: #fafbff;
+}
+
+/* Warning row — coach is UNASSIGNED */
+.rs-row-warn td {
+  background: #fffbf0;
+}
+
+.rs-row-warn:hover td {
+  background: #fff8e6;
+}
+
+/* ── Column sizing ──────────────────────────────────────────────────────── */
+
+.rs-col-activity  { min-width: 160px; font-weight: 500; }
+.rs-col-datetime  { min-width: 150px; font-variant-numeric: tabular-nums; }
+.rs-col-facility  { min-width: 100px; }
+.rs-col-capacity  { min-width: 80px;  text-align: center; font-variant-numeric: tabular-nums; }
+.rs-col-coach     { min-width: 220px; }
+.rs-col-action    { min-width: 90px;  text-align: right; white-space: nowrap; }
+
+/* ── Coach select ───────────────────────────────────────────────────────── */
+
+.rs-coach-select {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  font-size: 12px;
+  font-family: inherit;
+  color: #333;
+  background: #fff;
+  cursor: pointer;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.rs-coach-select:focus {
+  outline: none;
+  border-color: #0066cc;
+  box-shadow: 0 0 0 3px rgba(0, 102, 204, 0.1);
+}
+
+.rs-coach-select:disabled {
+  background: #f5f5f5;
+  color: #999;
+  cursor: not-allowed;
+}
+
+/* Highlight unassigned select */
+.rs-row-warn .rs-coach-select {
+  border-color: #f39c12;
+  background: #fffdf5;
+}
+
+/* ── Validate button — compact for table cells ──────────────────────────── */
+
+.rs-validate-btn {
+  padding: 5px 14px;
+  font-size: 11.5px;
+}
+
+/* ── Unassigned badge ───────────────────────────────────────────────────── */
+
+.rs-unassigned {
+  display: inline-block;
+  padding: 2px 7px;
+  background: #fff3cd;
+  border: 1px solid #ffc107;
+  border-radius: 3px;
+  color: #856404;
+  font-size: 11px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+/* ── Footer hint ────────────────────────────────────────────────────────── */
+
+.rs-footer-hint {
+  font-size: 11px;
+  color: #999;
+}
+
+/* ── Responsive ─────────────────────────────────────────────────────────── */
+
+@media (max-width: 768px) {
+  .rs-modal {
+    width: 96vw;
+    max-height: 92vh;
+  }
+
+  .rs-table th,
+  .rs-table td {
+    padding: 8px 10px;
+  }
+
+  .rs-col-coach {
+    min-width: 160px;
+  }
+}
