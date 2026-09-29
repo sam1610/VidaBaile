@@ -262,7 +262,15 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.groups(['Admins']),
     ]),
+    generateDraftSchedules: a
+  .mutation()
+  .arguments({ adminSub: a.string().required() })
+  .returns(a.json())
+  .authorization((allow) => [allow.groups(['Admins'])])
+  .handler(a.handler.function('vidaBaileSchedulingEngine')),
+
 });
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Custom Mutations — Lambda-backed operations
@@ -278,14 +286,7 @@ const schema = a.schema({
  *
  * Authorization: Admins Cognito group only.
  */
-generateDraftSchedules: a
-  .mutation()
-  .arguments({ adminSub: a.string().required() })
-  .returns(a.json())
-  .authorization((allow) => [allow.groups(['Admins'])])
-  .handler(a.handler.function('vidaBaileSchedulingEngine')),
 
-});
 
 export type Schema = ClientSchema<typeof schema>;
 
