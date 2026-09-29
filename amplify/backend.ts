@@ -15,6 +15,7 @@ import { vidaBaileProcessOutboundQueue } from './functions/vidaBaileProcessOutbo
 import { vidaBaileDispatchBroadcast } from './functions/vidaBaileDispatchBroadcast/resource';
 import { vidaBaileCampaignScheduler } from './functions/vidaBaileCampaignScheduler/resource';
 import { vidaBaileFlowEndpoint } from './functions/vidaBaileFlowEndpoint/resource';
+import { vidaBaileSchedulingEngine } from './functions/vidaBaileSchedulingEngine/resource';
 
 export const backend = defineBackend({
   auth,
@@ -26,6 +27,7 @@ export const backend = defineBackend({
   vidaBaileDispatchBroadcast,
   vidaBaileCampaignScheduler,
   vidaBaileFlowEndpoint,
+  vidaBaileSchedulingEngine,
 });
 
 // ── Cognito password policy override ────────────────────────────────────────
@@ -367,3 +369,30 @@ backend.addOutput({
     VidaBaileFlowUrl: flowUrl.url,
   },
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION F: Scheduling Engine (on-demand AppSync mutation → Lambda)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const schedulingEngineLambda = backend.vidaBaileSchedulingEngine.resources.lambda as LambdaFunction;
+
+// Full table access: reads BOOKING, FACILITY, COACH, SCHEDULE, UNAVAILABILITY;
+// writes SCHEDULE (PutItem) and patches BOOKINGs (UpdateItem).
+backend.vidaBaileSchedulingEngine.resources.lambda.addToRolePolicy(
+  new PolicyStatement({
+    effect: Effect.ALLOW,
+    actions: [
+      'dynamodb:GetItem',
+      'dynamodb:PutItem',
+      'dynamodb:UpdateItem',
+      'dynamodb:Query',
+    ],
+    resources: [
+      CLUBRECORD_TABLE_ARN.toString(),
+      CLUBRECORD_GSI1_ARN.toString(),
+      CLUBRECORD_GSI2_ARN.toString(),
+    ],
+  }),
+);
+
+schedulingEngineLambda.addEnvironment('TABLE_NAME', clubRecordTable.tableName);

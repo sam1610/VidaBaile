@@ -264,6 +264,29 @@ const schema = a.schema({
     ]),
 });
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Custom Mutations — Lambda-backed operations
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * generateDraftSchedules
+ *
+ * Triggers the deterministic scheduling engine for the calling admin tenant.
+ * Processes all PENDING_SCHEDULING bookings and writes DRAFT_PROPOSAL schedules.
+ *
+ * Returns a JSON summary: { processed, schedules[], warnings[], errors[] }
+ *
+ * Authorization: Admins Cognito group only.
+ */
+generateDraftSchedules: a
+  .mutation()
+  .arguments({ adminSub: a.string().required() })
+  .returns(a.json())
+  .authorization((allow) => [allow.groups(['Admins'])])
+  .handler(a.handler.function('vidaBaileSchedulingEngine')),
+
+});
+
 export type Schema = ClientSchema<typeof schema>;
 
 export const data = defineData({
