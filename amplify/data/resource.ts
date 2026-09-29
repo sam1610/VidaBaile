@@ -181,6 +181,7 @@ const schema = a.schema({
       date: a.date(),                 // 2024-09-03 (for schedule queries)
       startTime: a.time(),            // 18:00:00
       endTime: a.time(),              // 19:30:00
+      endDateTime: a.datetime(),      // Full ISO 8601 datetime — used by COACH_UNAVAILABILITY (endTime is AWSTime only)
       facilityId: a.string(),         // facility-001
       activityType: a.string(),       // "Salsa Beginner", "Bachata Advanced"
       capacity: a.integer(),          // 20 (max attendees)

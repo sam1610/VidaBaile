@@ -35,7 +35,7 @@ function formatDateTime(iso: string): string {
 interface UnavailBlock {
   sk: string;
   gsi1sk: string;
-  endTime: string;
+  endDateTime: string;
   reason: string;
 }
 
@@ -146,7 +146,7 @@ export const CoachCrudModal = ({
         .map((item: any) => ({
           sk:      item.sk      ?? '',
           gsi1sk:  item.gsi1sk  ?? '',
-          endTime: item.endTime ?? '',
+          endDateTime: item.endDateTime ?? '',
           reason:  item.reason  ?? '',
         }))
         .sort((a, b) => a.gsi1sk.localeCompare(b.gsi1sk));
@@ -174,7 +174,7 @@ export const CoachCrudModal = ({
         entityType: 'COACH_UNAVAILABILITY',
         gsi1pk:     adminSub + '#UNAVAIL#' + coach.phone,
         gsi1sk:     'DATETIME#' + isoStart,
-        endTime:    isoEnd,
+        endDateTime:    isoEnd,
         reason:     newBlock.reason,
       });
       setNewBlock({ start: '', end: '', reason: '' });
@@ -390,7 +390,7 @@ export const CoachCrudModal = ({
                         <div className="unavail-item-times">
                           <span className="unavail-item-start">{formatDateTime(isoStart)}</span>
                           <span className="unavail-item-arrow">&rarr;</span>
-                          <span className="unavail-item-end">{formatDateTime(block.endTime)}</span>
+                          <span className="unavail-item-end">{formatDateTime(block.endDateTime)}</span>
                         </div>
                         {block.reason && (
                           <span className="unavail-item-reason">{block.reason}</span>
