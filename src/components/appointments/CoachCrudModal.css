@@ -134,7 +134,9 @@
 
 .form-group textarea {
   resize: vertical;
-  min-height: 80px;
+  min-height: 60px;
+  max-height: 160px;
+  overflow-y: auto;
 }
 
 .modal-footer {
@@ -354,16 +356,41 @@ input[aria-invalid="true"] {
   background: #f5f7fa;
   border: 1px solid #dde1e7;
   border-radius: 6px;
-  padding: 12px;
+  padding: 10px 12px 8px;
   margin-top: 8px;
 }
 
 .unavail-add-form .form-group {
-  margin-bottom: 10px;
+  margin-bottom: 8px;
+}
+
+/* Start / End side by side */
+.unavail-datetime-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.unavail-datetime-row .form-group {
+  flex: 1;
+  min-width: 0;
+  margin-bottom: 8px;
 }
 
 .unavail-add-form-actions {
   display: flex;
   gap: 8px;
-  margin-top: 4px;
+  margin-top: 6px;
+}
+
+/* Compact two-column rows for short fields */
+.form-row-2col {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.form-row-2col .form-group {
+  flex: 1;
+  min-width: 0;
 }

@@ -277,50 +277,52 @@ export const CoachCrudModal = ({
 
         <div className="modal-body">
 
-          <div className="form-group">
-            <label htmlFor="name">Name *</label>
-            <input id="name" type="text" name="name"
-              value={formData.name || ''}
-              onChange={handleChange}
-              placeholder="Coach name"
-              disabled={saving || deleting}
-              autoFocus
-            />
+          <div className="form-row-2col">
+            <div className="form-group">
+              <label htmlFor="name">Name *</label>
+              <input id="name" type="text" name="name"
+                value={formData.name || ''}
+                onChange={handleChange}
+                placeholder="Coach name"
+                disabled={saving || deleting}
+                autoFocus
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="phone">
+                Phone *{isEditMode && <span className="field-note"> (locked)</span>}
+              </label>
+              <input id="phone" type="tel" name="phone"
+                value={formData.phone || ''}
+                onChange={handleChange}
+                placeholder="+1-555-0001"
+                disabled={isEditMode || saving || deleting}
+                aria-invalid={!!phoneError}
+                aria-describedby={phoneError ? 'phone-error' : undefined}
+              />
+              {phoneError && <div id="phone-error" className="form-error">{phoneError}</div>}
+            </div>
           </div>
 
-          <div className="form-group">
-            <label htmlFor="phone">
-              Phone *{isEditMode && <span className="field-note"> (Cannot be changed)</span>}
-            </label>
-            <input id="phone" type="tel" name="phone"
-              value={formData.phone || ''}
-              onChange={handleChange}
-              placeholder="+1-555-0001"
-              disabled={isEditMode || saving || deleting}
-              aria-invalid={!!phoneError}
-              aria-describedby={phoneError ? 'phone-error' : undefined}
-            />
-            {phoneError && <div id="phone-error" className="form-error">{phoneError}</div>}
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="specialty">Specialty *</label>
-            <input id="specialty" type="text" name="specialty"
-              value={formData.specialty || ''}
-              onChange={handleChange}
-              placeholder="e.g., Salsa Gold, Bachata"
-              disabled={saving || deleting}
-            />
-          </div>
-
-          <div className="form-group">
-            <label htmlFor="email">Email</label>
-            <input id="email" type="email" name="email"
-              value={formData.email || ''}
-              onChange={handleChange}
-              placeholder="coach@example.com"
-              disabled={saving || deleting}
-            />
+          <div className="form-row-2col">
+            <div className="form-group">
+              <label htmlFor="specialty">Specialty *</label>
+              <input id="specialty" type="text" name="specialty"
+                value={formData.specialty || ''}
+                onChange={handleChange}
+                placeholder="e.g., Salsa, Bachata"
+                disabled={saving || deleting}
+              />
+            </div>
+            <div className="form-group">
+              <label htmlFor="email">Email</label>
+              <input id="email" type="email" name="email"
+                value={formData.email || ''}
+                onChange={handleChange}
+                placeholder="coach@example.com"
+                disabled={saving || deleting}
+              />
+            </div>
           </div>
 
           <div className="form-group">
@@ -416,24 +418,26 @@ export const CoachCrudModal = ({
                 </button>
               ) : (
                 <div className="unavail-add-form">
-                  <div className="form-group">
-                    <label htmlFor="unavail-start">Start *</label>
-                    <input
-                      id="unavail-start"
-                      type="datetime-local"
-                      value={newBlock.start}
-                      onChange={(e) => setNewBlock((p) => ({ ...p, start: e.target.value }))}
-                    />
-                  </div>
-                  <div className="form-group">
-                    <label htmlFor="unavail-end">End *</label>
-                    <input
-                      id="unavail-end"
-                      type="datetime-local"
-                      value={newBlock.end}
-                      min={newBlock.start}
-                      onChange={(e) => setNewBlock((p) => ({ ...p, end: e.target.value }))}
-                    />
+                  <div className="unavail-datetime-row">
+                    <div className="form-group">
+                      <label htmlFor="unavail-start">Start *</label>
+                      <input
+                        id="unavail-start"
+                        type="datetime-local"
+                        value={newBlock.start}
+                        onChange={(e) => setNewBlock((p) => ({ ...p, start: e.target.value }))}
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label htmlFor="unavail-end">End *</label>
+                      <input
+                        id="unavail-end"
+                        type="datetime-local"
+                        value={newBlock.end}
+                        min={newBlock.start}
+                        onChange={(e) => setNewBlock((p) => ({ ...p, end: e.target.value }))}
+                      />
+                    </div>
                   </div>
                   <div className="form-group">
                     <label htmlFor="unavail-reason">Reason</label>

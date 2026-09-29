@@ -161,7 +161,7 @@ const schema = a.schema({
        *   records.filter(r => r.entityType === 'MEMBER')
        *   records.filter(r => r.entityType === 'COACH')
        */
-      entityType: a.enum(['MEMBER', 'COACH', 'SCHEDULE', 'BOOKING', 'PACKAGE', 'CLAIM', 'FACILITY', 'CATALOG', 'BROADCAST', 'BROADCAST_RECEIPT', 'PROFILE']),
+      entityType: a.enum(['MEMBER', 'COACH', 'SCHEDULE', 'BOOKING', 'PACKAGE', 'CLAIM', 'FACILITY', 'CATALOG', 'BROADCAST', 'BROADCAST_RECEIPT', 'PROFILE', 'COACH_UNAVAILABILITY']),
       // =========================================================================
       // SHARED OPTIONAL ATTRIBUTES
       // =========================================================================
