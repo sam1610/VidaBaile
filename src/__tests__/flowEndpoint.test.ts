@@ -73,21 +73,7 @@ vi.mock('crypto', async (importOriginal) => {
 // Helper: build a fake Lambda event whose body is a plain JSON string.
 // The handler calls `decryptMetaRequest(body, PRIVATE_KEY)` on the parsed body —
 // we intercept that by patching the module after import.
-function makeFakeEvent(decryptedPayload: object) {
-  // We encode the "encrypted" body as a plain JSON string that looks like
-  // a Meta Flow payload structure.  The actual crypto fields are irrelevant
-  // because we mock decryptMetaRequest before the handler runs.
-  return {
-    body: JSON.stringify({
-      encrypted_aes_key:   'fake-aes-key',
-      encrypted_flow_data: 'fake-flow-data',
-      initial_vector:      'fake-iv',
-      // We stash the pre-decrypted payload here as a signal to our mock
-      __testDecryptedPayload: decryptedPayload,
-    }),
-    isBase64Encoded: false,
-  };
-}
+ 
 
 // ── Test suite ───────────────────────────────────────────────────────────────
 
