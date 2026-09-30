@@ -283,82 +283,74 @@ export const handler = async (event: any) => {
       // }
       // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
       else if (payload.action === "FINALIZE_SUBMISSION" || payload.consent_given) {
-        console.log(`🎯 FINALIZE_SUBMISSION: package=${payload.package_id}, date=${payload.date}, time=${payload.time}`);
+        console.log(`🎯 FINALIZE_SUBMISSION: package=\({payload.package_id}, date=\){payload.date}, time=${payload.time}`);
         const timestamp = new Date().toISOString();
 
         try {
           const broadcastId = resolveBroadcastId(decryptedData);
+          let memberPhone = "UNKNOWN_PHONE";
 
+          // 1. Resolve the member's phone number
           if (broadcastId) {
-            // ── SCENARIO A: Update Existing Broadcast Receipt ──
-            const recipientPhone = await findReceiptPhone(adminSub, broadcastId);
-            if (recipientPhone) {
-              const receiptSk = `BROADCAST#${broadcastId}#MEMBER#${recipientPhone}`;
-              await ddb.send(new UpdateItemCommand({
-                TableName: TABLE_NAME,
-                Key: { pk: { S: adminSub }, sk: { S: receiptSk } },
-                UpdateExpression:
-                  "SET memberBookingStatus = :status, packageId = :pkgId, validFrom = :date, startTime = :time, memberConfirmedAt = :ts, updatedAt = :ts",
-                ExpressionAttributeValues: {
-                  ":status": { S: "BOOKED" },
-                  ":pkgId":  { S: payload.package_id || "UNKNOWN" },
-                  ":date":   { S: payload.date   || "" },
-                  ":time":   { S: payload.time   || "" },
-                  ":ts":     { S: timestamp },
-                  ":typename": { S: "ClubRecord" }
-                },
-              }));
-              console.log(`📝 Updated Broadcast Receipt for scheduling: ${receiptSk}`);
-            }
-          } else {
-            // ── SCENARIO B: Create New Direct Catalog Booking ──
-            let memberPhone = "UNKNOWN_PHONE";
-            if (decryptedData?.flow_token) {
-               try {
-                 // Decode the base64 JSON token passed by the Chat Agent
-                 const decoded = JSON.parse(Buffer.from(decryptedData.flow_token, "base64").toString("utf8"));
-                 if (decoded.phone) memberPhone = decoded.phone;
-               } catch (e) {
-                 console.warn("Could not decode phone from chat token.");
-               }
-            }
+             const receiptPhone = await findReceiptPhone(adminSub, broadcastId);
+             if (receiptPhone) memberPhone = receiptPhone;
+          } else if (decryptedData?.flow_token) {
+             try {
+               const decoded = JSON.parse(Buffer.from(decryptedData.flow_token, "base64").toString("utf8"));
+               if (decoded.phone) memberPhone = decoded.phone;
+             } catch (e) {
+               console.warn("Could not decode phone from chat token.");
+             }
+          }
 
-            const bookingId = crypto.randomUUID();
-            // Using your schema's required composite SK pattern: BOOKING##MEMBER#
-            const bookingSk = `BOOKING#${bookingId}#MEMBER#${memberPhone}`; 
+          // 2. ALWAYS create a unified BOOKING record for the Scheduling Engine
+          const bookingId = crypto.randomUUID();
+          const bookingSk = `BOOKING#\({bookingId}#MEMBER#\){memberPhone}`; 
 
+          await ddb.send(new UpdateItemCommand({
+            TableName: TABLE_NAME,
+            Key: { pk: { S: adminSub }, sk: { S: bookingSk } },
+            UpdateExpression:
+              "SET entityType = :type, phone = :phone, packageId = :pkgId, #dateAttr = :date, startTime = :time, #statusAttr = :status, bookedAt = :ts, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk, #typename = :typename",
+            ExpressionAttributeNames: {
+              "#dateAttr": "date",     
+              "#statusAttr": "status",  
+              "#typename": "__typename"
+            },
+            ExpressionAttributeValues: {
+              ":type":     { S: "BOOKING" },
+              ":phone":    { S: memberPhone },
+              ":pkgId":    { S: payload.package_id || "UNKNOWN" },
+              ":date":     { S: payload.date   || "" },
+              ":time":     { S: payload.time   || "" },
+              ":status":   { S: "PENDING_SCHEDULING" }, // Required by Timetable Agent
+              ":ts":       { S: timestamp },
+              ":gsi1pk":   { S: `${adminSub}#BOOKINGS` }, 
+              ":gsi1sk":   { S: `STATUS#PENDING_SCHEDULING` }, // Required by Timetable Agent
+              ":typename": { S: "ClubRecord" }
+            },
+          }));
+          console.log(`✅ Unified Booking created for scheduling: ${bookingSk}`);
+
+          // 3. If it originated from a Broadcast, update the receipt for campaign analytics
+          if (broadcastId && memberPhone !== "UNKNOWN_PHONE") {
+            const receiptSk = `BROADCAST#\({broadcastId}#MEMBER#\){memberPhone}`;
             await ddb.send(new UpdateItemCommand({
               TableName: TABLE_NAME,
-              Key: { pk: { S: adminSub }, sk: { S: bookingSk } },
-              // Using SET so it creates a new item if it doesn't exist
-              UpdateExpression:
-                "SET entityType = :type, phone = :phone, packageId = :pkgId, #dateAttr = :date, startTime = :time, #statusAttr = :status, bookedAt = :ts, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk",
-              ExpressionAttributeNames: {
-                "#dateAttr": "date",     // 'date' is a reserved word in DynamoDB
-                "#statusAttr": "status",  // 'status' is a reserved word in DynamoDB
-                "#typename": "__typename"
-              },
+              Key: { pk: { S: adminSub }, sk: { S: receiptSk } },
+              UpdateExpression: "SET memberBookingStatus = :status, memberConfirmedAt = :ts, updatedAt = :ts",
               ExpressionAttributeValues: {
-                ":type":   { S: "BOOKING" },
-                ":phone":  { S: memberPhone },
-                ":pkgId":  { S: payload.package_id || "UNKNOWN" },
-                ":date":   { S: payload.date   || "" },
-                ":time":   { S: payload.time   || "" },
-                ":status": { S: "PENDING_SCHEDULING" },
+                ":status": { S: "BOOKED" },
                 ":ts":     { S: timestamp },
-                // Populate GSI1 so you can easily query all bookings for the Timetable Agent
-                ":gsi1pk": { S: `${adminSub}#BOOKINGS` }, 
-                ":gsi1sk": { S: `STATUS#PENDING_SCHEDULING` } ,
-                ":typename": { S: "ClubRecord" }
               },
             }));
-            console.log(`✅ Created Direct Booking for scheduling: ${bookingSk}`);
+            console.log(`📝 Broadcast Receipt marked as BOOKED: ${receiptSk}`);
           }
+
         } catch (dbErr: any) {
           console.error(`❌ FINALIZE_SUBMISSION DynamoDB write failed: ${dbErr.message}`);
         }
 
-        // Always navigate to Terminal_Success
         responseScreen = "Terminal_Success";
         responseData = {};
       }
