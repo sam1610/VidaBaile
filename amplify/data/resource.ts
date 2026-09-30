@@ -1,4 +1,5 @@
 import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
+import { vidaBaileSchedulingEngine } from '../functions/vidaBaileSchedulingEngine/resource';
 
 /**
  * SINGLE-TABLE DESIGN (STD) BACKEND SCHEMA
@@ -262,31 +263,27 @@ const schema = a.schema({
     .authorization((allow) => [
       allow.groups(['Admins']),
     ]),
-    generateDraftSchedules: a
-  .mutation()
-  .arguments({ adminSub: a.string().required() })
-  .returns(a.json())
-  .authorization((allow) => [allow.groups(['Admins'])])
-  .handler(a.handler.function('vidaBaileSchedulingEngine')),
+  /**
+   * generateTimetable
+   *
+   * On-demand mutation that triggers the deterministic scheduling engine.
+   * Groups all PENDING_SCHEDULING bookings by date + dance style, finds
+   * conflict-free coaches and facilities, and writes DRAFT_PROPOSAL SCHEDULE
+   * records that the admin can review and confirm.
+   *
+   * The Lambda receives: event.arguments.adminSub
+   * It returns:          { processed, schedules[], warnings[], errors[] }
+   *
+   * Authorization: Admins Cognito group only.
+   */
+  generateTimetable: a
+    .mutation()
+    .arguments({ adminSub: a.string().required() })
+    .returns(a.json())
+    .authorization((allow) => [allow.groups(['Admins'])])
+    .handler(a.handler.function(vidaBaileSchedulingEngine)),
 
 });
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Custom Mutations — Lambda-backed operations
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * generateDraftSchedules
- *
- * Triggers the deterministic scheduling engine for the calling admin tenant.
- * Processes all PENDING_SCHEDULING bookings and writes DRAFT_PROPOSAL schedules.
- *
- * Returns a JSON summary: { processed, schedules[], warnings[], errors[] }
- *
- * Authorization: Admins Cognito group only.
- */
-
 
 export type Schema = ClientSchema<typeof schema>;
 

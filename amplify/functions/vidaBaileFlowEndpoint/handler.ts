@@ -305,6 +305,7 @@ export const handler = async (event: any) => {
                   ":date":   { S: payload.date   || "" },
                   ":time":   { S: payload.time   || "" },
                   ":ts":     { S: timestamp },
+                  ":typename": { S: "ClubRecord" }
                 },
               }));
               console.log(`📝 Updated Broadcast Receipt for scheduling: ${receiptSk}`);
@@ -334,7 +335,8 @@ export const handler = async (event: any) => {
                 "SET entityType = :type, phone = :phone, packageId = :pkgId, #dateAttr = :date, startTime = :time, #statusAttr = :status, bookedAt = :ts, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk",
               ExpressionAttributeNames: {
                 "#dateAttr": "date",     // 'date' is a reserved word in DynamoDB
-                "#statusAttr": "status"  // 'status' is a reserved word in DynamoDB
+                "#statusAttr": "status",  // 'status' is a reserved word in DynamoDB
+                "#typename": "__typename"
               },
               ExpressionAttributeValues: {
                 ":type":   { S: "BOOKING" },
@@ -342,11 +344,12 @@ export const handler = async (event: any) => {
                 ":pkgId":  { S: payload.package_id || "UNKNOWN" },
                 ":date":   { S: payload.date   || "" },
                 ":time":   { S: payload.time   || "" },
-                ":status": { S: "CONFIRMED" },
+                ":status": { S: "PENDING_SCHEDULING" },
                 ":ts":     { S: timestamp },
                 // Populate GSI1 so you can easily query all bookings for the Timetable Agent
                 ":gsi1pk": { S: `${adminSub}#BOOKINGS` }, 
-                ":gsi1sk": { S: `DATETIME#${payload.date}T${payload.time}:00` } 
+                ":gsi1sk": { S: `STATUS#PENDING_SCHEDULING` } ,
+                ":typename": { S: "ClubRecord" }
               },
             }));
             console.log(`✅ Created Direct Booking for scheduling: ${bookingSk}`);

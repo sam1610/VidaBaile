@@ -402,6 +402,7 @@ async function writeDraftSchedule(
     Item: {
       pk:               { S: adminSub },
       sk:               { S: `SCHEDULE#${sid}` },
+      __typename:       { S: "ClubRecord" },
       entityType:       { S: "SCHEDULE" },
       // GSI1: admin schedule listing filtered by status
       gsi1pk:           { S: `${adminSub}#SCHEDULES` },
