@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '../../hooks/useAppSync';
 import { useAdminSub } from '../../hooks';
 import DatabaseService from '../../services/DatabaseService';
 import { ActivityCrudModal } from './ActivityCrudModal';
@@ -76,6 +78,10 @@ export const ActivitiesTab = () => {
   const [showModal, setShowModal] = useState(false);
   const [editingActivity, setEditingActivity] = useState<Schedule | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // ── Generate Auto-Schedule state ──────────────────────────────────
+  const [isGenerating, setIsGenerating] = useState(false);
+  const [generateResult, setGenerateResult] = useState<string | null>(null);
 
   // Fetch coaches for name mapping
   useEffect(() => {
@@ -219,6 +225,28 @@ export const ActivitiesTab = () => {
 
     return Object.values(grouped);
   }, [schedules, startDate, endDate]);
+
+  const handleGenerateAutoSchedule = async () => {
+    if (!adminSub) return;
+    setIsGenerating(true);
+    setGenerateResult(null);
+    try {
+      const client = generateClient<Schema>();
+      const { data: result, errors } = await (client.mutations as any).generateTimetable({
+        adminSub,
+      });
+      if (errors?.length) throw new Error(errors[0].message);
+      const summary = result as { processed?: number; warnings?: string[] } | null;
+      const msg = `Generated ${summary?.processed ?? 0} draft schedule(s).`
+        + (summary?.warnings?.length ? ` ${summary.warnings.length} warning(s).` : '');
+      setGenerateResult(msg);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : 'Scheduling failed';
+      setGenerateResult(`Error: ${msg}`);
+    } finally {
+      setIsGenerating(false);
+    }
+  };
 
   const handleOpenNewActivity = () => {
     setEditingActivity(null);
@@ -372,6 +400,39 @@ export const ActivitiesTab = () => {
         >
           + New Activity
         </button>
+
+        <button
+          onClick={handleGenerateAutoSchedule}
+          disabled={isGenerating || !adminSub}
+          aria-busy={isGenerating}
+          data-testid="generate-auto-schedule-btn"
+          style={{
+            padding: '6px 12px',
+            background: isGenerating ? '#666' : '#1565c0',
+            color: 'white',
+            border: 'none',
+            borderRadius: '4px',
+            cursor: isGenerating ? 'not-allowed' : 'pointer',
+            fontSize: '12px',
+            fontWeight: '600',
+            opacity: isGenerating ? 0.7 : 1,
+          }}
+        >
+          {isGenerating ? 'Generating…' : '⚡ Generate Auto-Schedule'}
+        </button>
+
+        {generateResult && (
+          <span
+            data-testid="generate-result-banner"
+            style={{
+              fontSize: '11px',
+              color: generateResult.startsWith('Error') ? '#c62828' : '#2e7d32',
+              fontWeight: '500',
+            }}
+          >
+            {generateResult}
+          </span>
+        )}
         </div>
       </div>
       {/* End Top Controls Section */}

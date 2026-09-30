@@ -168,6 +168,27 @@ const amplifyOutputs: any = {
               "isRequired": false,
               "attributes": []
             },
+            "endDateTime": {
+              "name": "endDateTime",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "startDateTime": {
+              "name": "startDateTime",
+              "isArray": false,
+              "type": "AWSDateTime",
+              "isRequired": false,
+              "attributes": []
+            },
+            "reason": {
+              "name": "reason",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false,
+              "attributes": []
+            },
             "facilityId": {
               "name": "facilityId",
               "isArray": false,
@@ -513,11 +534,28 @@ const amplifyOutputs: any = {
             "CATALOG",
             "BROADCAST",
             "BROADCAST_RECEIPT",
-            "PROFILE"
+            "PROFILE",
+            "COACH_UNAVAILABILITY"
           ]
         }
       },
-      "nonModels": {}
+      "nonModels": {},
+      "mutations": {
+        "generateTimetable": {
+          "name": "generateTimetable",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "adminSub": {
+              "name": "adminSub",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            }
+          }
+        }
+      }
     }
   },
   "version": "1.5",

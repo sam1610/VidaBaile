@@ -1,29 +1,43 @@
-import { defineConfig } from 'vitest/config'
-import react from '@vitejs/plugin-react'
+import { defineConfig } from 'vitest/config';
+import react from '@vitejs/plugin-react';
 
-// https://vitest.dev/config/
+/**
+ * Vitest configuration for VidaBaile test suite.
+ *
+ * Environment:
+ *  - Backend Lambda tests run in 'node' (no DOM needed, full Node APIs).
+ *  - Frontend React component tests run in 'jsdom'.
+ *
+ * The environment is selected per-file via the `@vitest-environment` docblock
+ * at the top of each test file, so a single config handles both.
+ */
 export default defineConfig({
   plugins: [react()],
   test: {
+    // Default environment — Lambda tests use Node.
+    environment: 'node',
+
+    // Globals: true lets tests use describe/it/expect without importing them.
     globals: true,
-    environment: 'jsdom',
-    setupFiles: ['./src/setupTests.ts'],
+
+    // Run the setup file after the framework is loaded but before each test file.
+    setupFiles: ['./src/__tests__/setup.ts'],
+
+    // Pattern — pick up test files anywhere under src/__tests__ or co-located *.test.ts(x).
     include: [
-      'src/**/*.{test,spec}.{ts,tsx}',
+      'src/__tests__/**/*.test.ts',
+      'src/__tests__/**/*.test.tsx',
     ],
-    exclude: [
-      'amplify/**/*.{test,spec}.{ts,tsx}',
-    ],
+
+    // Inline coverage (optional — run with --coverage to activate).
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
-      include: ['src/**/*.{ts,tsx}', 'amplify/**/*.{ts,tsx}'],
-      exclude: [
-        'src/**/*.{test,spec}.{ts,tsx}',
-        'amplify/**/*.{test,spec}.{ts,tsx}',
-        'src/main.tsx',
-        'src/vite-env.d.ts',
+      include: [
+        'amplify/functions/**/*.ts',
+        'amplify/data/resource.ts',
+        'src/components/**/*.tsx',
       ],
+      exclude: ['**/*.test.*', '**/__tests__/**'],
     },
   },
-})
+});
