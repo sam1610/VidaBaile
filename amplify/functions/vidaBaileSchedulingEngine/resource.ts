@@ -13,6 +13,7 @@ import { defineFunction } from '@aws-amplify/backend';
 export const vidaBaileSchedulingEngine = defineFunction({
   name: 'vidaBaileSchedulingEngine',
   entry: './handler.ts',
+  resourceGroupName: 'data',
   runtime: 20,
   timeoutSeconds: 60,
   memoryMB: 512,

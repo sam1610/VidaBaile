@@ -15,6 +15,7 @@ import { defineFunction } from '@aws-amplify/backend';
 export const vidaBaileCampaignScheduler = defineFunction({
   name: 'vidaBaileCampaignScheduler',
   entry: './handler.ts',
+  resourceGroupName: 'data',
   runtime: 20,
   // 55s: well within the 1-minute EventBridge window.
   // Async dispatch invocations return immediately (InvocationType: Event)
