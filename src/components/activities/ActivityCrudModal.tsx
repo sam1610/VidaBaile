@@ -98,60 +98,84 @@ export function ActivityCrudModal({
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
 
-  // Hydrate form with activity data and load existing members
+  // Hydrate form + fetch enrolled members when modal opens or active schedule changes.
+  // Inlined as a single async effect so the booking fetch always runs with the
+  // correct activity reference and is properly awaited before state is set.
+  // Dependency on activity?.scheduleId ensures re-fetch when switching schedules.
   useEffect(() => {
-    if (isOpen && isEditMode && activity) {
-      console.log('[ActivityCrudModal] Loading activity for edit:', activity);
-      setFormData({
-        date: activity.date || '',
-        startTime: activity.startTime || '18:00',
-        endTime: activity.endTime || '19:30',
-        coachPhone: activity.coachPhone || '',
-        facilityId: activity.facilityId || '',
-        level: activity.level || 'Open Level',
-        capacity: activity.capacity || 45,
-        activityType: activity.activityType || '',
-      });
-      setErrors({});
-      setActiveTab('activity');
+    if (!isOpen) return;
 
-      // Load existing members for this schedule
-      loadExistingMembers();
-    } else if (isOpen && !isEditMode) {
-      console.log('[ActivityCrudModal] Modal opened in create mode');
-      setFormData({
-        date: new Date().toISOString().split('T')[0],
-        startTime: '18:00',
-        endTime: '19:30',
-        coachPhone: '',
-        facilityId: '',
-        level: 'Open Level',
-        capacity: 45,
-        activityType: '',
-      });
-      setSelectedMembers([]);
-      setOriginalMembers([]);
-      setErrors({});
-      setActiveTab('activity');
-    }
-  }, [isOpen, isEditMode, activity]);
+    let cancelled = false;
 
-  // Load existing members for the schedule
-  const loadExistingMembers = async () => {
-    if (!isEditMode || !activity) return;
+    const initModal = async () => {
+      if (isEditMode && activity) {
+        console.log('[ActivityCrudModal] Loading activity for edit:', activity);
+        setFormData({
+          date: activity.date || '',
+          startTime: activity.startTime || '18:00',
+          endTime: activity.endTime || '19:30',
+          coachPhone: activity.coachPhone || '',
+          facilityId: activity.facilityId || '',
+          level: activity.level || 'Open Level',
+          capacity: activity.capacity || 45,
+          activityType: activity.activityType || '',
+        });
+        setErrors({});
+        setActiveTab('activity');
 
-    try {
-      const bookings = await DatabaseService.queryBookingsBySchedule(adminSub, activity.scheduleId);
-      const memberPhones = bookings
-        .filter((b) => b.phone)
-        .map((b) => b.phone);
-      setSelectedMembers(memberPhones);
-      setOriginalMembers(memberPhones);
-      console.log('[ActivityCrudModal] Loaded existing members:', memberPhones.length, 'members:', memberPhones);
-    } catch (error) {
-      console.error('[ActivityCrudModal] Failed to load existing members:', error);
-    }
-  };
+        // Fetch bookings that were stamped with this scheduleId by the engine.
+        // Both `phone` (flow endpoint) are checked so the mapping is resilient.
+        try {
+          const bookings = await DatabaseService.queryBookingsBySchedule(
+            adminSub,
+            activity.scheduleId
+          );
+          if (cancelled) return;
+
+          console.log('[ActivityCrudModal] Raw bookings from DB:', bookings);
+
+          const memberPhones: string[] = bookings
+            .map((b: any) => b.phone ?? b.memberPhone ?? null)
+            .filter((p: string | null): p is string => Boolean(p));
+
+          console.log(
+            '[ActivityCrudModal] Resolved member phones:',
+            memberPhones.length,
+            memberPhones
+          );
+
+          setSelectedMembers(memberPhones);
+          setOriginalMembers(memberPhones);
+        } catch (error) {
+          console.error('[ActivityCrudModal] Failed to load existing members:', error);
+        }
+
+      } else if (!isEditMode) {
+        console.log('[ActivityCrudModal] Modal opened in create mode');
+        setFormData({
+          date: new Date().toISOString().split('T')[0],
+          startTime: '18:00',
+          endTime: '19:30',
+          coachPhone: '',
+          facilityId: '',
+          level: 'Open Level',
+          capacity: 45,
+          activityType: '',
+        });
+        setSelectedMembers([]);
+        setOriginalMembers([]);
+        setErrors({});
+        setActiveTab('activity');
+      }
+    };
+
+    initModal();
+    return () => { cancelled = true; };
+
+  // activity?.scheduleId is the key discriminator: re-run whenever a different
+  // schedule is opened for editing, not just when isOpen toggles.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen, isEditMode, activity?.scheduleId, adminSub]);
 
   // Fetch coaches, facilities, and members on modal open
   useEffect(() => {
