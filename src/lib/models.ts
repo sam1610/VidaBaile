@@ -88,8 +88,9 @@ export interface Coach extends ClubRecord {
   name: string; // Juan Martinez
   email?: string;
   status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
-  specialty: string; // Salsa, Bachata, Merengue, etc.
-  bio?: string; // Short biography
+  specialty: string;           // legacy free-text (kept for backward compat)
+  authorizedPackages?: string[]; // array of authorized CATALOG packageIds
+  bio?: string;                  // Short biography
 }
 
 /**

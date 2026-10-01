@@ -454,3 +454,44 @@ input[aria-invalid="true"] {
   padding: 3px 8px;
   font-size: 11px;
 }
+
+/* ── Authorized-packages checkbox grid ──────────────────────────────────── */
+
+.pkg-checkbox-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 12px;
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  background: #fafafa;
+  max-height: 160px;
+  overflow-y: auto;
+}
+
+.pkg-checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #333;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.pkg-checkbox-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  cursor: pointer;
+  accent-color: #0066cc;
+}
+
+.pkg-checkbox-item input[type="checkbox"]:disabled {
+  cursor: not-allowed;
+}
+
+.form-hint {
+  font-size: 12px;
+  color: #999;
+  margin: 4px 0;
+}

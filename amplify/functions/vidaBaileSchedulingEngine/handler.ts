@@ -31,6 +31,7 @@
 
 import {
   DynamoDBClient,
+  GetItemCommand,
   QueryCommand,
   PutItemCommand,
   UpdateItemCommand,
@@ -247,14 +248,37 @@ function selectFacility(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Step 4 — Fetch COACH records whose specialty matches the dance style
+// Step 3c — Resolve a packageId to its human-readable name from CATALOG record
+//           Written into the SCHEDULE's activityType so the UI table renders.
 // ─────────────────────────────────────────────────────────────────────────────
 
-async function fetchMatchingCoaches(adminSub: string, danceStyle: string): Promise<Coach[]> {
-  // Fetch all coaches then filter in-memory on specialty.
-  // A dedicated GSI on specialty would be ideal for large rosters, but the
-  // existing schema uses SPECIALTY# in gsi1sk only for coaches queried via
-  // gsi1pk=<adminSub>#COACHES — which requires a FilterExpression anyway.
+async function getPackageName(adminSub: string, packageId: string): Promise<string> {
+  try {
+    const res = await ddb.send(new GetItemCommand({
+      TableName: TABLE_NAME,
+      Key: { pk: { S: adminSub }, sk: { S: `CATALOG#${packageId}` } },
+    }));
+    const item = res.Item as RawItem | undefined;
+    return (
+      item?.name?.S?.trim() ||
+      item?.packageType?.S?.trim() ||
+      packageId
+    );
+  } catch {
+    return packageId;
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Step 4 — Fetch COACH records authorized for the requested packageId.
+//
+// Primary match: coach.authorizedPackages[] contains the booking's packageId.
+// Backward-compat fallback: if a coach has no authorizedPackages yet, fall back
+// to the legacy specialty string check so existing records still match until
+// the admin re-saves them with the new checkbox UI.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async function fetchMatchingCoaches(adminSub: string, packageId: string): Promise<Coach[]> {
   const items: RawItem[] = [];
   let lastKey: any = undefined;
 
@@ -275,10 +299,20 @@ async function fetchMatchingCoaches(adminSub: string, danceStyle: string): Promi
     lastKey = res.LastEvaluatedKey;
   } while (lastKey);
 
-  const lower = danceStyle.toLowerCase();
+  const lowerPackageId = packageId.toLowerCase();
+
   return items
     .filter(i => i.entityType?.S === "COACH")
-    .filter(i => (i.specialty?.S ?? "").toLowerCase().includes(lower))
+    .filter(i => {
+      // ── Primary: authorizedPackages list (new schema field) ──────────────
+      const rawList = i.authorizedPackages?.L;
+      if (rawList && rawList.length > 0) {
+        return rawList.some((entry: any) => entry?.S === packageId);
+      }
+      // ── Fallback: legacy specialty free-text (backward compat) ───────────
+      const specialty = (i.specialty?.S ?? "").toLowerCase();
+      return specialty.length > 0 && specialty.includes(lowerPackageId);
+    })
     .map(i => ({
       sk:          i.sk?.S ?? "",
       coachPhone:  (i.sk?.S ?? "").replace("COACH#", ""),
@@ -464,7 +498,8 @@ async function processGroup(
   adminSub: string,
   group: Group,
   facilities: Facility[],
-  coaches: Coach[]
+  coaches: Coach[],
+  activityName?: string
 ): Promise<{ scheduleIds: string[]; warnings: string[] }> {
   const warnings: string[] = [];
   const slot = proposeSlot(group);
@@ -503,7 +538,7 @@ async function processGroup(
     }
     const sid = await writeDraftSchedule(
       adminSub, slot, group, assignedCoach, facilityId,
-      group.headcount, group.packageId
+      group.headcount, activityName ?? group.packageId
     );
     await patchBookings(adminSub, group.bookings, sid);
     scheduleIds.push(sid);
@@ -518,7 +553,7 @@ async function processGroup(
 
     // First half
     const sid1 = await writeDraftSchedule(
-      adminSub, slot, group, assignedCoach, fid1, half1.length, group.packageId
+      adminSub, slot, group, assignedCoach, fid1, half1.length, activityName ?? group.packageId
     );
     await patchBookings(adminSub, half1, sid1);
 
@@ -546,7 +581,7 @@ async function processGroup(
     const assignedCoach2 = coach2?.coachPhone ?? assignedCoach; // fall back to same coach
 
     const sid2 = await writeDraftSchedule(
-      adminSub, slot2, group, assignedCoach2, fid2, half2.length, group.packageId
+      adminSub, slot2, group, assignedCoach2, fid2, half2.length, activityName ?? group.packageId
     );
     await patchBookings(adminSub, half2, sid2);
 
@@ -609,8 +644,11 @@ export const handler = async (event: any): Promise<{
           `[Engine]   ${coaches.length} coach(es) match specialty "${group.packageId}"`
         );
 
+        // Resolve human-readable name for the SCHEDULE's activityType field
+        const activityName = await getPackageName(adminSub, group.packageId);
+
         const { scheduleIds, warnings } = await processGroup(
-          adminSub, group, facilities, coaches
+          adminSub, group, facilities, coaches, activityName
         );
         allSchedules.push(...scheduleIds);
         allWarnings.push(...warnings);

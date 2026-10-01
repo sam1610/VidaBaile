@@ -56,6 +56,11 @@ interface NewBlock {
   reason: string;
 }
 
+interface CatalogItem {
+  packageId: string;
+  name: string;
+}
+
 // ── Props ────────────────────────────────────────────────────────────────────
 
 export interface CoachCrudModalProps {
@@ -110,6 +115,11 @@ export const CoachCrudModal = ({
   const [isAddingUnavail, setIsAddingUnavail]   = useState(false);
   const [newBlock, setNewBlock]                 = useState<NewBlock>({ start: '', end: '', reason: '' });
 
+  // ── Catalog packages state ──────────────────────────────────────────────────
+  const [catalogs, setCatalogs]                   = useState<CatalogItem[]>([]);
+  const [loadingCatalogs, setLoadingCatalogs]     = useState(false);
+  const [authorizedPackages, setAuthorizedPackages] = useState<string[]>([]);
+
   // ── Sync form when coach changes ──────────────────────────────────────────
   useEffect(() => {
     if (coach) {
@@ -118,8 +128,10 @@ export const CoachCrudModal = ({
         specialty: coach.specialty || '', email: coach.email || '',
         bio: coach.bio || '', status: coach.status || 'ACTIVE',
       });
+      setAuthorizedPackages(coach.authorizedPackages ?? []);
     } else {
       setFormData({ name: '', phone: '', specialty: '', email: '', bio: '', status: 'ACTIVE' });
+      setAuthorizedPackages([]);
     }
     setError(null);
     setPhoneError(null);
@@ -130,6 +142,40 @@ export const CoachCrudModal = ({
   useEffect(() => {
     if (externalError) setError(externalError);
   }, [externalError]);
+
+  // ── Fetch catalog packages when modal opens ─────────────────────────────────
+  useEffect(() => {
+    if (!isOpen || !adminSub) return;
+    let cancelled = false;
+    setLoadingCatalogs(true);
+    (async () => {
+      try {
+        const client = generateClient<Schema>();
+        const { data: items, errors } = await (client.models as any).ClubRecord.listByGsi1({
+          gsi1pk: `${adminSub}#CATALOG`,
+        });
+        if (errors?.length) {
+          console.error('[CoachCrudModal] catalog fetch errors:', errors);
+          return;
+        }
+        if (!cancelled) {
+          const list: CatalogItem[] = ((items as any[]) ?? [])
+            .filter((r: any) => r.entityType === 'CATALOG' && r.status !== 'INACTIVE')
+            .map((r: any) => ({
+              packageId: (r.sk ?? '').replace('CATALOG#', ''),
+              name:      r.name?.trim() || r.packageType?.trim() || r.sk?.replace('CATALOG#', '') || 'Unnamed Package',
+            }))
+            .sort((a: CatalogItem, b: CatalogItem) => a.name.localeCompare(b.name));
+          setCatalogs(list);
+        }
+      } catch (err) {
+        console.error('[CoachCrudModal] fetchCatalogs failed:', err);
+      } finally {
+        if (!cancelled) setLoadingCatalogs(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [isOpen, adminSub]);
 
   // ── Auto-fetch unavailabilities ───────────────────────────────────────────
   useEffect(() => {
@@ -264,14 +310,17 @@ export const CoachCrudModal = ({
   };
 
   const validateForm = () => {
-    if (!formData.name?.trim())        { setError('Name is required');      return false; }
-    if (!formData.phone?.trim())       { setError('Phone is required');     return false; }
+    if (!formData.name?.trim())  { setError('Name is required');    return false; }
+    if (!formData.phone?.trim()) { setError('Phone is required');   return false; }
     if (!PHONE_REGEX.test(formData.phone!)) {
       setError('Phone must be in E.164 format (e.g., +1-555-0001)');
       setPhoneError('Phone must be in E.164 format (e.g., +1-555-0001)');
       return false;
     }
-    if (!formData.specialty?.trim())   { setError('Specialty is required'); return false; }
+    if (authorizedPackages.length === 0) {
+      setError('At least one authorized package must be selected.');
+      return false;
+    }
     return true;
   };
 
@@ -279,7 +328,7 @@ export const CoachCrudModal = ({
     if (!validateForm()) return;
     setSaving(true);
     try {
-      await onSave(formData);
+      await onSave({ ...formData, authorizedPackages });
       handleClose();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to save coach');
@@ -304,6 +353,7 @@ export const CoachCrudModal = ({
 
   const handleClose = () => {
     setFormData({ name: '', phone: '', specialty: '', email: '', bio: '', status: 'ACTIVE' });
+    setAuthorizedPackages([]);
     setError(null);
     setPhoneError(null);
     setIsAddingUnavail(false);
@@ -353,25 +403,50 @@ export const CoachCrudModal = ({
             </div>
           </div>
 
-          <div className="form-row-2col">
-            <div className="form-group">
-              <label htmlFor="specialty">Specialty *</label>
-              <input id="specialty" type="text" name="specialty"
-                value={formData.specialty || ''}
-                onChange={handleChange}
-                placeholder="e.g., Salsa, Bachata"
-                disabled={saving || deleting}
-              />
-            </div>
-            <div className="form-group">
-              <label htmlFor="email">Email</label>
-              <input id="email" type="email" name="email"
-                value={formData.email || ''}
-                onChange={handleChange}
-                placeholder="coach@example.com"
-                disabled={saving || deleting}
-              />
-            </div>
+          <div className="form-group">
+            <label>
+              Authorized Packages *
+              <span className="field-note"> (select all dance styles this coach can teach)</span>
+            </label>
+            {loadingCatalogs ? (
+              <p className="unavail-loading">Loading packages…</p>
+            ) : catalogs.length === 0 ? (
+              <p className="form-hint">No catalog packages found. Add packages first.</p>
+            ) : (
+              <div className="pkg-checkbox-grid">
+                {catalogs.map((cat) => {
+                  const checked = authorizedPackages.includes(cat.packageId);
+                  return (
+                    <label key={cat.packageId} className="pkg-checkbox-item">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        disabled={saving || deleting}
+                        onChange={() => {
+                          setAuthorizedPackages(prev =>
+                            checked
+                              ? prev.filter(id => id !== cat.packageId)
+                              : [...prev, cat.packageId]
+                          );
+                          setError(null);
+                        }}
+                      />
+                      <span>{cat.name}</span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+
+          <div className="form-group">
+            <label htmlFor="email">Email</label>
+            <input id="email" type="email" name="email"
+              value={formData.email || ''}
+              onChange={handleChange}
+              placeholder="coach@example.com"
+              disabled={saving || deleting}
+            />
           </div>
 
           <div className="form-group">

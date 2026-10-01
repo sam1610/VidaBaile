@@ -175,7 +175,8 @@ const schema = a.schema({
       email: a.string(),              // "clara@vidabaile.local"
       status: a.string(),             // ACTIVE, INACTIVE, SUSPENDED
       tier: a.string(),               // MEMBER only: STANDARD, SILVER, GOLD, PLATINUM
-      specialty: a.string(),          // COACH only: Salsa, Bachata, Merengue, etc.
+      specialty: a.string(),          // COACH only: legacy free-text (kept for backward compat)
+      authorizedPackages: a.string().array(), // COACH only: array of authorized CATALOG packageIds
       bio: a.string(),                // COACH only: Short biography
 
       /** SCHEDULE Attributes */
