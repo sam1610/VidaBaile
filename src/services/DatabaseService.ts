@@ -1774,11 +1774,17 @@ export async function queryBookingsBySchedule(
   const client = generateClient<Schema>();
 
   try {
+    // Direct GSI2 lookup — O(1) partition read, no scan or filter needed.
+    // The scheduling engine writes gsi2pk = <adminSub>#SCHEDULE#<scheduleId>
+    // on every booking it processes, so this index is always populated.
     const result = await (client.models as any).ClubRecord.listByGsi2({
       gsi2pk: `${adminSub}#SCHEDULE#${scheduleId}`,
     });
 
-    const bookings = result.data || [];
+    const bookings: any[] = (result.data ?? []).filter(
+      (r: any) => r.entityType === 'BOOKING'
+    );
+
     console.log(`[DB Service] Found ${bookings.length} bookings for schedule ${scheduleId}`);
     return bookings;
   } catch (error) {

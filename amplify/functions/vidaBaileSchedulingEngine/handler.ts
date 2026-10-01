@@ -496,12 +496,17 @@ async function patchBookings(
     ddb.send(new UpdateItemCommand({
       TableName:        TABLE_NAME,
       Key:              { pk: { S: adminSub }, sk: { S: b.sk } },
-      UpdateExpression: "SET #st = :status, scheduleId = :sid, gsi1sk = :gsi1sk, updatedAt = :now",
+      // Also write GSI2 keys so the booking is directly addressable by scheduleId
+      // via the clubRecordsByGsi2pkAndGsi2sk index — avoids full partition scans.
+      // Read pattern: gsi2pk = <adminSub>#SCHEDULE#<scheduleId>
+      UpdateExpression: "SET #st = :status, scheduleId = :sid, gsi1sk = :gsi1sk, gsi2pk = :gsi2pk, gsi2sk = :gsi2sk, updatedAt = :now",
       ExpressionAttributeNames:  { "#st": "status" },
       ExpressionAttributeValues: {
         ":status": { S: "DRAFT_PROPOSAL" },
         ":sid":    { S: scheduleId },
         ":gsi1sk": { S: "STATUS#DRAFT_PROPOSAL" },
+        ":gsi2pk": { S: `${adminSub}#SCHEDULE#${scheduleId}` },
+        ":gsi2sk": { S: `DATETIME#${now}` },
         ":now":    { S: now },
       },
     }))
