@@ -125,6 +125,7 @@ export const AppointmentsTab = () => {
           status: formData.status || 'ACTIVE',
           email: formData.email || '',
           bio: formData.bio || '',
+          authorizedPackages: formData.authorizedPackages ?? [],
         });
         await (client.models as any).ClubRecord.update(updatedCoach);
         showToast('Coach updated successfully');
@@ -136,6 +137,7 @@ export const AppointmentsTab = () => {
           status: formData.status || 'ACTIVE',
           email: formData.email || '',
           bio: formData.bio || '',
+          authorizedPackages: formData.authorizedPackages ?? [],
         });
         await (client.models as any).ClubRecord.create(newCoach);
         showToast('Coach created successfully');
