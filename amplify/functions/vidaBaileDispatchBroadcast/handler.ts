@@ -114,7 +114,7 @@ async function createBroadcastRecord(
         ExpressionAttributeValues: exprVals,
       })
     );
-    console.log(`📊 Updated BROADCAST record: \({adminSub}#BROADCAST#\){broadcastId}`);
+    console.log(`📊 Updated BROADCAST record: ${adminSub}#BROADCAST#${broadcastId}`);
   } catch (err: any) {
     console.error(`❌ Failed to create BROADCAST record: ${err.message}`);
     throw err;
@@ -181,7 +181,7 @@ export const handler = async (event: any) => {
 
       if (!isScheduled && currentStatus) {
         console.warn(
-          `⚠️ Campaign \({broadcastId} has status="\){currentStatus}" and gsi1sk="${currentGsi1sk}" — skipping dispatch`
+          `⚠️ Campaign {broadcastId} has status="${currentStatus}" and gsi1sk="${currentGsi1sk}" — skipping dispatch`
         );
         return { success: false, error: `Campaign already ${currentStatus}` };
       }

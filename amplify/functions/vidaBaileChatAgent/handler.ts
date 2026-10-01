@@ -553,7 +553,7 @@ export const handler = async (event: any) => {
 
           if (contextWamid && i === 0) payload.context = { message_id: contextWamid };
 
-          console.log(`📲 WhatsApp text attempt | to=\({payload.to} | chunk=\){i+1}/${chunks.length}`);
+          console.log(`📲 WhatsApp text attempt | to=${payload.to} | chunk=${i+1}/${chunks.length}`);
           const res = await fetch(
             `https://graph.facebook.com/v20.0/${WHATSAPP_PHONE_ID}/messages`,
             {

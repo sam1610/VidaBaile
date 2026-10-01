@@ -234,7 +234,7 @@ export const handler = async (event: any) => {
       const wamid = status.id;
       const newStatus = status.status; 
 
-      console.log(`📍 Status: WAMID \({wamid} →\){newStatus}`);
+      console.log(`📍 Status: WAMID ${wamid} →${newStatus}`);
 
       const receipt = await findBroadcastReceiptByWamid(wamid);
       if (receipt) {
@@ -481,7 +481,7 @@ export const handler = async (event: any) => {
         })
       );
 
-      console.log(`📨 [\({msgType}] Queued: "\){messageText.substring(0, 50)}" from ${senderPhone} to chatAgent`);
+      console.log(`📨 [{msgType}] Queued: "${messageText.substring(0, 50)}" from ${senderPhone} to chatAgent`);
     }
 
     return { statusCode: 200, body: "OK" };
