@@ -32,13 +32,15 @@
  */
 
 import {
-  AttributeValue,
   DynamoDBClient,
   GetItemCommand,
   QueryCommand,
-  QueryCommandOutput,
   PutItemCommand,
   UpdateItemCommand,
+} from "@aws-sdk/client-dynamodb";
+import type {
+  AttributeValue,
+  QueryCommandOutput,
 } from "@aws-sdk/client-dynamodb";
 import { randomUUID } from "crypto";
 
