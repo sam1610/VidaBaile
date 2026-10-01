@@ -170,7 +170,7 @@ export async function updateMemberRecord(
 export async function createCoachRecord(
   adminSub: string,
   phone: string,
-  data: { name: string; specialty: string; status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'; email?: string; bio?: string }
+  data: { name: string; specialty: string; status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'; email?: string; bio?: string; authorizedPackages?: string[] }
 ): Promise<Coach> {
   try {
     const client = generateClient<Schema>();
@@ -181,6 +181,7 @@ export async function createCoachRecord(
       status: data.status,
       email: data.email || '',
       bio: data.bio || '',
+      authorizedPackages: data.authorizedPackages ?? [],
     });
 
     const { data: createdRecord, errors } = await (client.models as any).ClubRecord.create(coach);
@@ -217,7 +218,7 @@ export async function createCoachRecord(
 export async function updateCoachRecord(
   adminSub: string,
   phone: string,
-  updates: Partial<{ name: string; specialty: string; status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'; email: string; bio: string }>
+  updates: Partial<{ name: string; specialty: string; status: 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'; email: string; bio: string; authorizedPackages: string[] }>
 ): Promise<Coach> {
   try {
     const client = generateClient<Schema>();
@@ -228,6 +229,7 @@ export async function updateCoachRecord(
       status: updates.status || 'ACTIVE',
       email: updates.email || '',
       bio: updates.bio || '',
+      authorizedPackages: updates.authorizedPackages ?? [],
     });
 
     const { data: updatedRecord, errors } = await (client.models as any).ClubRecord.update(updatedCoach);
