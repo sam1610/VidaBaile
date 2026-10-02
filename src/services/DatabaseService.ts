@@ -2126,57 +2126,63 @@ export async function queryBookingsByMember(
   try {
     const client = generateClient<Schema>();
 
-    // Dual-query strategy:
-    //   Query A — UI-created bookings indexed under adminSub#MEMBER#phone
-    //   Query B — Automated/WhatsApp bookings indexed under adminSub#BOOKINGS
-    // Both paths are required because the two write paths use different GSI1 keys.
+    // Dual-query strategy — both write paths use different GSI1 keys:
+    //   Query A — UI bookings:        gsi1pk = adminSub#MEMBER#phone
+    //   Query B — Automated bookings: gsi1pk = adminSub#BOOKINGS
     const [resultA, resultB] = await Promise.all([
       (client.models as any).ClubRecord.listByGsi1({
         gsi1pk: `${adminSub}#MEMBER#${memberPhone}`,
         gsi1sk: { beginsWith: 'BOOKING#' },
-      }),
+      }).catch((e: any) => { console.error('[DB] Query A failed:', e); return { data: [] }; }),
+
       (client.models as any).ClubRecord.listByGsi1({
         gsi1pk: `${adminSub}#BOOKINGS`,
-      }),
+      }).catch((e: any) => { console.error('[DB] Query B failed:', e); return { data: [] }; }),
     ]);
 
-    const fromA: any[] = (resultA.data || [])
-      .filter((r: any) => r && r.entityType === 'BOOKING');
+    // Query A: all BOOKING entities returned (already member-scoped by GSI key)
+    const fromA: any[] = ((resultA as any).data ?? [])
+      .filter((r: any) => r?.entityType === 'BOOKING');
 
-    // Filter Query B to only records belonging to this member
-    const fromB: any[] = (resultB.data || [])
+    // Query B: filter in-memory — check phone, memberPhone, sk, or sk substring
+    const fromB: any[] = ((resultB as any).data ?? [])
       .filter((r: any) => {
         if (!r || r.entityType !== 'BOOKING') return false;
-        if (r.phone       === memberPhone) return true;
+        // Direct phone attribute match (most reliable)
+        if (r.phone === memberPhone)       return true;
         if (r.memberPhone === memberPhone) return true;
-        // Fallback: check sk pattern BOOKING#<id>#MEMBER#<phone>
+        // sk contains the phone: BOOKING#<id>#MEMBER#<phone>
+        if (r.sk?.includes(memberPhone))   return true;
+        // Precise parse of MEMBER# segment as extra safety
         if (r.sk?.includes('MEMBER#')) {
-          return r.sk.split('MEMBER#')[1]?.split('#')[0] === memberPhone;
+          const parsed = r.sk.split('MEMBER#')[1]?.split('#')[0];
+          if (parsed === memberPhone) return true;
         }
         return false;
       });
 
-    // Merge and deduplicate by sk
+    console.log(`[DB] queryBookingsByMember: fromA=${fromA.length} fromB=${fromB.length} member=${memberPhone}`);
+
+    // Merge and deduplicate by sk (fromA wins on collision)
     const seen = new Set<string>();
     const merged = [...fromA, ...fromB].filter((r: any) => {
-      if (!r || !r.sk || seen.has(r.sk)) return false;
+      if (!r?.sk || seen.has(r.sk)) return false;
       seen.add(r.sk);
       return true;
     });
 
     return merged.map((item: any) => ({
-      bookingId:   item.sk?.replace(/^BOOKING#/, '').split('#')[0] ?? '',
-      scheduleId:  item.scheduleId,
-      coachPhone:  item.coachPhone,
-      phone:       item.phone,
-      memberPhone: item.memberPhone,
-      packageId:   item.packageId,   // present on automated WhatsApp bookings
-      bookedAt:    item.bookedAt || item.createdAt,
-      // Denormalized schedule data
-      activityType: item.activityType,
-      date:         item.date,
-      startTime:    item.startTime,
-      endTime:      item.endTime,
+      bookingId:    item?.sk?.replace(/^BOOKING#/, '').split('#')[0] ?? '',
+      scheduleId:   item?.scheduleId,
+      coachPhone:   item?.coachPhone,
+      phone:        item?.phone,
+      memberPhone:  item?.memberPhone,
+      packageId:    item?.packageId,
+      bookedAt:     item?.bookedAt || item?.createdAt,
+      activityType: item?.activityType,
+      date:         item?.date,
+      startTime:    item?.startTime,
+      endTime:      item?.endTime,
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to query bookings';

@@ -106,6 +106,16 @@ export function MemberEnrollmentsModal({
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Date range filter — default: first→last day of current month
+  const [startDate, setStartDate] = useState<string>(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0];
+  });
+  const [endDate, setEndDate] = useState<string>(() => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0];
+  });
+
   /**
    * Query bookings when member changes or modal opens
    */
@@ -135,6 +145,12 @@ export function MemberEnrollmentsModal({
   if (!isOpen || !member) {
     return null;
   }
+
+  // In-memory date range filter — only show rows where booking.date is within range
+  const filteredBookings = bookings.filter((b) => {
+    if (!b.date) return true; // no date = include (don't hide it)
+    return b.date >= startDate && b.date <= endDate;
+  });
 
   return (
     <div
@@ -226,8 +242,30 @@ export function MemberEnrollmentsModal({
           </div>
         )}
 
+        {/* Date Range Picker */}
+        <div style={{ display: 'flex', gap: '12px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '16px' }}>
+          <label style={{ fontSize: '12px', fontWeight: '600', color: '#555' }}>From:</label>
+          <input
+            type="date"
+            value={startDate}
+            onChange={(e) => setStartDate(e.target.value)}
+            style={{ padding: '5px 8px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '12px' }}
+          />
+          <label style={{ fontSize: '12px', fontWeight: '600', color: '#555' }}>To:</label>
+          <input
+            type="date"
+            value={endDate}
+            min={startDate}
+            onChange={(e) => setEndDate(e.target.value)}
+            style={{ padding: '5px 8px', border: '1px solid #ddd', borderRadius: '4px', fontSize: '12px' }}
+          />
+          <span style={{ fontSize: '11px', color: '#999' }}>
+            {filteredBookings.length} session{filteredBookings.length !== 1 ? 's' : ''} in range
+          </span>
+        </div>
+
         {/* Empty State */}
-        {!isLoading && bookings.length === 0 && (
+        {!isLoading && filteredBookings.length === 0 && (
           <div style={{ textAlign: 'center', padding: '40px 20px', color: '#999' }}>
             <div style={{ fontSize: '14px', fontWeight: '500' }}>
               No activity enrollments found
@@ -236,7 +274,7 @@ export function MemberEnrollmentsModal({
         )}
 
         {/* Table */}
-        {!isLoading && bookings.length > 0 && (
+        {!isLoading && filteredBookings.length > 0 && (
           <div style={{ overflowX: 'auto' }}>
             <table style={{
               width: '100%',
@@ -291,7 +329,7 @@ export function MemberEnrollmentsModal({
                 </tr>
               </thead>
               <tbody>
-                {bookings.map((booking) => {
+                {filteredBookings.map((booking) => {
                   const coach = coaches.find(c => c.phone === booking.coachPhone);
                   
                   // Get activity info from booking (denormalized data)
