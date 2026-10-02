@@ -333,14 +333,18 @@ export function MemberEnrollmentsModal({
                   const coach = coaches.find(c => c.phone === booking.coachPhone);
                   
                   // Get activity info from booking (denormalized data)
-                  const activityType = booking.activityType || '—';
+                  const activityType = booking.activityType || 'Pending Assignment';
                   const bookedDate = booking.bookedAt ? formatDate(booking.bookedAt) : '—';
                   
                   // Build timing string
+                  // Note: automated bookings may have date/time but no bookedAt, so
+                  // we only require date + startTime to show a useful time string.
                   let timingStr = '—';
-                  if (booking.date && booking.startTime && booking.endTime && booking.bookedAt) {
+                  if (booking.date && booking.startTime) {
                     const sDate = formatDate(booking.date);
-                    timingStr = `${sDate}: ${booking.startTime} - ${booking.endTime} / ${bookedDate}`;
+                    const endPart = booking.endTime ? ` - ${booking.endTime}` : '';
+                    const bookedPart = booking.bookedAt ? ` / ${bookedDate}` : '';
+                    timingStr = `${sDate}: ${booking.startTime}${endPart}${bookedPart}`;
                   }
                   
                   // Determine status and color for temporal indication
