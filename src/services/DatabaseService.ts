@@ -372,6 +372,7 @@ export async function updateScheduleRecord(
     coachPhone: string;
     capacity: number;
     currentOccupancy?: number; // Current enrollment count
+    status?: string;           // e.g. DRAFT_PROPOSAL → CONFIRMED
   }
 ): Promise<Schedule> {
   try {
@@ -392,6 +393,8 @@ export async function updateScheduleRecord(
       coachPhone: updates.coachPhone,
       capacity: updates.capacity,
       currentOccupancy: updates.currentOccupancy || 0,
+      // Persist status when provided (e.g. DRAFT_PROPOSAL → CONFIRMED)
+      ...(updates.status ? { status: updates.status } : {}),
       // GSI keys for querying and filtering
       gsi1pk: `${adminSub}#SCHEDULES`,
       gsi1sk: `COACH#${updates.coachPhone}#TIME#${updates.startTime}`,

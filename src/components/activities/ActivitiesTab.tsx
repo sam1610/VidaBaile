@@ -31,6 +31,7 @@ interface Schedule {
   capacity: number;
   level?: string;
   currentOccupancy?: number;
+  status?: string;  // e.g. DRAFT_PROPOSAL | CONFIRMED
 }
 
 interface SchedulesByDate {
@@ -181,6 +182,7 @@ export const ActivitiesTab = () => {
             capacity: item.capacity || 30,
             level: item.level || 'Open Level',
             currentOccupancy: item.currentOccupancy || 0,
+            status: item.status || undefined,
           }));
         setSchedules(scheduleList);
         setSchedulesLoading(false);
@@ -288,6 +290,8 @@ export const ActivitiesTab = () => {
         coachPhone: data.coachPhone,
         capacity: data.capacity,
         currentOccupancy: data.currentOccupancy || 0,
+        // Include status when the Admin approves a DRAFT_PROPOSAL
+        ...(data.status ? { status: data.status } : {}),
       };
       
       console.log('[ActivitiesTab] Received modal data with currentOccupancy:', data.currentOccupancy, 'Payload:', payload);
@@ -506,11 +510,31 @@ export const ActivitiesTab = () => {
                     </tr>
 
                     {/* Schedule Rows */}
-                    {day.schedules.map((schedule) => (
-                      <tr key={schedule.scheduleId}>
+                    {day.schedules.map((schedule) => {
+                      const isDraft = schedule.status === 'DRAFT_PROPOSAL';
+                      return (
+                      <tr
+                        key={schedule.scheduleId}
+                        style={isDraft ? { background: '#fffbeb', borderLeft: '3px solid #f59e0b' } : {}}
+                      >
                         <td>
-                          <div style={{ fontWeight: '600', fontSize: '12px', color: '#2e3b50' }}>
+                          <div style={{ fontWeight: '600', fontSize: '12px', color: '#2e3b50', display: 'flex', alignItems: 'center', gap: '6px' }}>
                             {schedule.activityType}
+                            {isDraft && (
+                              <span style={{
+                                fontSize: '10px',
+                                fontWeight: '600',
+                                color: '#1565c0',
+                                background: '#e3f2fd',
+                                border: '1px solid #90caf9',
+                                borderRadius: '3px',
+                                padding: '1px 5px',
+                                whiteSpace: 'nowrap',
+                                lineHeight: '1.4',
+                              }}>
+                                Auto-generated
+                              </span>
+                            )}
                           </div>
                         </td>
                         <td style={{ fontSize: '12px', fontWeight: '500', color: '#1a1a1a' }}>
@@ -566,7 +590,8 @@ export const ActivitiesTab = () => {
                           </button>
                         </td>
                       </tr>
-                    ))}
+                      );
+                    })}
                   </React.Fragment>
                 ) : null
               )}

@@ -32,6 +32,7 @@ interface ActivityFormData {
   capacity: number;
   activityType: string;
   currentOccupancy?: number;
+  status?: string;  // DRAFT_PROPOSAL | CONFIRMED
 }
 
 interface Schedule {
@@ -45,6 +46,7 @@ interface Schedule {
   capacity: number;
   name?: string;
   level?: string;
+  status?: string;  // DRAFT_PROPOSAL | CONFIRMED
 }
 
 interface ActivityCrudModalProps {
@@ -119,6 +121,7 @@ export function ActivityCrudModal({
           level: activity.level || 'Open Level',
           capacity: activity.capacity || 45,
           activityType: activity.activityType || '',
+          status: activity.status,
         });
         setErrors({});
         setActiveTab('activity');
@@ -295,6 +298,9 @@ export function ActivityCrudModal({
         ...formData,
         capacity: trueCapacity,
         currentOccupancy: selectedMembers.length,
+        // status flows from formData; may be updated by the Admin via the
+        // "Approve & Confirm" button before clicking Save
+        status: formData.status,
       };
       
       console.log('[ActivityCrudModal] Schedule payload capacity enforced from facility:', trueCapacity);
@@ -688,6 +694,70 @@ const getTierIcon = (tier?: string) => {
                   </div>
                 </div>
               </div>
+
+              {/* ── Status field (visible in edit mode; allows DRAFT → CONFIRMED) ── */}
+              {isEditMode && (
+                <div className="form-group" style={{ marginTop: '12px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: '600', color: '#555', display: 'block', marginBottom: '6px' }}>
+                    Schedule Status
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+                    {/* Status badge */}
+                    <span style={{
+                      fontSize: '11px',
+                      fontWeight: '700',
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      background: formData.status === 'DRAFT_PROPOSAL' ? '#fffbeb' : '#f0fdf4',
+                      border: `1px solid ${formData.status === 'DRAFT_PROPOSAL' ? '#f59e0b' : '#86efac'}`,
+                      color: formData.status === 'DRAFT_PROPOSAL' ? '#92400e' : '#166534',
+                      letterSpacing: '0.04em',
+                    }}>
+                      {formData.status === 'DRAFT_PROPOSAL' ? '⚡ Auto-generated Draft' : '✓ Confirmed'}
+                    </span>
+
+                    {/* Approve button — only shown for drafts */}
+                    {formData.status === 'DRAFT_PROPOSAL' && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, status: 'CONFIRMED' }))}
+                        style={{
+                          padding: '5px 12px',
+                          background: '#1565c0',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                          fontWeight: '600',
+                          letterSpacing: '0.03em',
+                        }}
+                      >
+                        ✓ Approve &amp; Confirm
+                      </button>
+                    )}
+
+                    {/* Revert button — only shown after approval, before saving */}
+                    {formData.status === 'CONFIRMED' && (isEditMode && activity?.status === 'DRAFT_PROPOSAL') && (
+                      <button
+                        type="button"
+                        onClick={() => setFormData(prev => ({ ...prev, status: 'DRAFT_PROPOSAL' }))}
+                        style={{
+                          padding: '5px 10px',
+                          background: 'transparent',
+                          color: '#999',
+                          border: '1px solid #ddd',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontSize: '11px',
+                        }}
+                      >
+                        Undo
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
             </>
           )}
 
