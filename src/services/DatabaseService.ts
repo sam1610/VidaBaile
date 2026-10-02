@@ -2141,12 +2141,12 @@ export async function queryBookingsByMember(
     ]);
 
     const fromA: any[] = (resultA.data || [])
-      .filter((r: any) => r.entityType === 'BOOKING');
+      .filter((r: any) => r && r.entityType === 'BOOKING');
 
     // Filter Query B to only records belonging to this member
     const fromB: any[] = (resultB.data || [])
       .filter((r: any) => {
-        if (r.entityType !== 'BOOKING') return false;
+        if (!r || r.entityType !== 'BOOKING') return false;
         if (r.phone       === memberPhone) return true;
         if (r.memberPhone === memberPhone) return true;
         // Fallback: check sk pattern BOOKING#<id>#MEMBER#<phone>
@@ -2159,7 +2159,7 @@ export async function queryBookingsByMember(
     // Merge and deduplicate by sk
     const seen = new Set<string>();
     const merged = [...fromA, ...fromB].filter((r: any) => {
-      if (!r.sk || seen.has(r.sk)) return false;
+      if (!r || !r.sk || seen.has(r.sk)) return false;
       seen.add(r.sk);
       return true;
     });
