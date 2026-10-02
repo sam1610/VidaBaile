@@ -2126,22 +2126,57 @@ export async function queryBookingsByMember(
   try {
     const client = generateClient<Schema>();
 
-    const result = await (client.models as any).ClubRecord.listByGsi1({
-      gsi1pk: `${adminSub}#MEMBER#${memberPhone}`,
-      gsi1sk: { beginsWith: 'BOOKING#' },
+    // Dual-query strategy:
+    //   Query A — UI-created bookings indexed under adminSub#MEMBER#phone
+    //   Query B — Automated/WhatsApp bookings indexed under adminSub#BOOKINGS
+    // Both paths are required because the two write paths use different GSI1 keys.
+    const [resultA, resultB] = await Promise.all([
+      (client.models as any).ClubRecord.listByGsi1({
+        gsi1pk: `${adminSub}#MEMBER#${memberPhone}`,
+        gsi1sk: { beginsWith: 'BOOKING#' },
+      }),
+      (client.models as any).ClubRecord.listByGsi1({
+        gsi1pk: `${adminSub}#BOOKINGS`,
+      }),
+    ]);
+
+    const fromA: any[] = (resultA.data || [])
+      .filter((r: any) => r.entityType === 'BOOKING');
+
+    // Filter Query B to only records belonging to this member
+    const fromB: any[] = (resultB.data || [])
+      .filter((r: any) => {
+        if (r.entityType !== 'BOOKING') return false;
+        if (r.phone       === memberPhone) return true;
+        if (r.memberPhone === memberPhone) return true;
+        // Fallback: check sk pattern BOOKING#<id>#MEMBER#<phone>
+        if (r.sk?.includes('MEMBER#')) {
+          return r.sk.split('MEMBER#')[1]?.split('#')[0] === memberPhone;
+        }
+        return false;
+      });
+
+    // Merge and deduplicate by sk
+    const seen = new Set<string>();
+    const merged = [...fromA, ...fromB].filter((r: any) => {
+      if (!r.sk || seen.has(r.sk)) return false;
+      seen.add(r.sk);
+      return true;
     });
 
-    return (result.data || []).map((item: any) => ({
-      bookingId: item.sk?.replace('BOOKING#', ''),
-      scheduleId: item.scheduleId,
-      coachPhone: item.coachPhone,
+    return merged.map((item: any) => ({
+      bookingId:   item.sk?.replace(/^BOOKING#/, '').split('#')[0] ?? '',
+      scheduleId:  item.scheduleId,
+      coachPhone:  item.coachPhone,
+      phone:       item.phone,
       memberPhone: item.memberPhone,
-      bookedAt: item.bookedAt || item.createdAt,
-      // Include denormalized schedule data stored on booking
+      packageId:   item.packageId,   // present on automated WhatsApp bookings
+      bookedAt:    item.bookedAt || item.createdAt,
+      // Denormalized schedule data
       activityType: item.activityType,
-      date: item.date,
-      startTime: item.startTime,
-      endTime: item.endTime,
+      date:         item.date,
+      startTime:    item.startTime,
+      endTime:      item.endTime,
     }));
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to query bookings';

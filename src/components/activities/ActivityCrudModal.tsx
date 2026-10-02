@@ -137,9 +137,20 @@ export function ActivityCrudModal({
 
           console.log('[ActivityCrudModal] Raw bookings from DB:', bookings);
 
+          // Resilient phone extraction: covers all data shapes written by
+          // the flow endpoint (phone), engine patchBookings (phone on original
+          // record), and any legacy shape where only the sk encodes the phone.
           const memberPhones: string[] = bookings
-            .map((b: any) => b.phone ?? b.memberPhone ?? null)
-            .filter((p: string | null): p is string => Boolean(p));
+            .map((b: any): string | null => {
+              if (b.phone)       return b.phone;
+              if (b.memberPhone) return b.memberPhone;
+              // Last resort: parse sk pattern BOOKING#<id>#MEMBER#<phone>
+              if (b.sk && b.sk.includes('MEMBER#')) {
+                return b.sk.split('MEMBER#')[1]?.split('#')[0] ?? null;
+              }
+              return null;
+            })
+            .filter((p): p is string => Boolean(p));
 
           console.log(
             '[ActivityCrudModal] Resolved member phones:',

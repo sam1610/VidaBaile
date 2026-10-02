@@ -14,6 +14,8 @@ interface Booking {
   scheduleId: string;
   coachPhone: string;
   memberPhone: string;
+  phone?: string;
+  packageId?: string;  // present on Campaign/WhatsApp bookings
   bookedAt: string;
   // Denormalized schedule data (matches schema field names)
   activityType?: string;
@@ -276,6 +278,16 @@ export function MemberEnrollmentsModal({
                   }}>
                     Coach
                   </th>
+                  <th style={{
+                    padding: '12px',
+                    textAlign: 'left',
+                    fontWeight: '600',
+                    color: '#2e3b50',
+                    fontSize: '11px',
+                    textTransform: 'uppercase',
+                  }}>
+                    Source
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -314,6 +326,39 @@ export function MemberEnrollmentsModal({
                       </td>
                       <td style={{ padding: '12px', verticalAlign: 'middle', whiteSpace: 'nowrap', minWidth: '100px' }}>
                         {coach?.name || '—'}
+                      </td>
+                      <td style={{ padding: '12px', verticalAlign: 'middle', whiteSpace: 'nowrap' }}>
+                        {booking.packageId ? (
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 7px',
+                            borderRadius: '3px',
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            letterSpacing: '0.03em',
+                            background: '#e3f2fd',
+                            border: '1px solid #90caf9',
+                            color: '#1565c0',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            Campaign Package
+                          </span>
+                        ) : (
+                          <span style={{
+                            display: 'inline-block',
+                            padding: '2px 7px',
+                            borderRadius: '3px',
+                            fontSize: '10px',
+                            fontWeight: '700',
+                            letterSpacing: '0.03em',
+                            background: '#f5f5f5',
+                            border: '1px solid #ddd',
+                            color: '#777',
+                            whiteSpace: 'nowrap',
+                          }}>
+                            Standard Booking
+                          </span>
+                        )}
                       </td>
                     </tr>
                   );
