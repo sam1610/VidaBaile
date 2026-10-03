@@ -1793,11 +1793,11 @@ export async function dispatchScheduleNotifications(
 
   try {
     if (schedule?.coachPhone) {
-      const coachRecord = await getCoachByPhoneRecord(adminSub, schedule.coachPhone);
+      const coachRecord = (await getCoachByPhoneRecord(adminSub, schedule.coachPhone)) as any;
       if (coachRecord?.name) coachName = coachRecord.name;
     }
     if (schedule?.facilityId) {
-      const facilityRecord = await getFacilityByIdRecord(adminSub, schedule.facilityId);
+      const facilityRecord = (await getFacilityByIdRecord(adminSub, schedule.facilityId)) as any;
       if (facilityRecord?.name) facilityName = facilityRecord.name;
     }
   } catch (err) {
@@ -1876,6 +1876,7 @@ export async function dispatchScheduleNotifications(
     throw error;
   }
 }
+
 
 // ============================================================================
 // UNIFIED EXPORT: All functions exported here (ONE export default only)
