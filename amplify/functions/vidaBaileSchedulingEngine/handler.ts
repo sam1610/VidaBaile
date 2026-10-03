@@ -33,6 +33,7 @@
 
 import {
   DynamoDBClient,
+  DeleteItemCommand,
   GetItemCommand,
   QueryCommand,
   PutItemCommand,
@@ -487,30 +488,54 @@ async function writeDraftSchedule(
 // ─────────────────────────────────────────────────────────────────────────────
 
 async function patchBookings(
-  adminSub:   string,
-  bookings:   Booking[],
-  scheduleId: string
+  adminSub:         string,
+  bookings:         Booking[],
+  scheduleId:       string,
+  coachPhone:       string,
+  realActivityName: string,
+  slot:             SlotProposal
 ): Promise<void> {
   const now = new Date().toISOString();
-  await Promise.all(bookings.map(b =>
-    ddb.send(new UpdateItemCommand({
-      TableName:        TABLE_NAME,
-      Key:              { pk: { S: adminSub }, sk: { S: b.sk } },
-      // Also write GSI2 keys so the booking is directly addressable by scheduleId
-      // via the clubRecordsByGsi2pkAndGsi2sk index — avoids full partition scans.
-      // Read pattern: gsi2pk = <adminSub>#SCHEDULE#<scheduleId>
-      UpdateExpression: "SET #st = :status, scheduleId = :sid, gsi1sk = :gsi1sk, gsi2pk = :gsi2pk, gsi2sk = :gsi2sk, updatedAt = :now",
-      ExpressionAttributeNames:  { "#st": "status" },
-      ExpressionAttributeValues: {
-        ":status": { S: "DRAFT_PROPOSAL" },
-        ":sid":    { S: scheduleId },
-        ":gsi1sk": { S: "STATUS#DRAFT_PROPOSAL" },
-        ":gsi2pk": { S: `${adminSub}#SCHEDULE#${scheduleId}` },
-        ":gsi2sk": { S: `DATETIME#${now}` },
-        ":now":    { S: now },
+  await Promise.all(bookings.map(async b => {
+    // Extract the original booking ID from BOOKING#<id>#MEMBER#<phone>
+    const parts     = b.sk.split("#");
+    const bookingId = parts[1] || randomUUID();
+    const newSk     = `BOOKING#${bookingId}#MEMBER#${b.memberPhone}#SCHEDULE#${scheduleId}`;
+
+    // 1. Create the fully-materialised booking record with the correct SK shape
+    await ddb.send(new PutItemCommand({
+      TableName: TABLE_NAME,
+      Item: {
+        pk:           { S: adminSub },
+        sk:           { S: newSk },
+        __typename:   { S: "ClubRecord" },
+        entityType:   { S: "BOOKING" },
+        gsi1pk:       { S: `${adminSub}#MEMBER#${b.memberPhone}` },
+        gsi1sk:       { S: `BOOKING#DATETIME#${now}` },
+        gsi2pk:       { S: `${adminSub}#SCHEDULE#${scheduleId}` },
+        gsi2sk:       { S: `DATETIME#${now}` },
+        phone:        { S: b.memberPhone },
+        memberPhone:  { S: b.memberPhone },
+        scheduleId:   { S: scheduleId },
+        coachPhone:   { S: coachPhone },
+        activityType: { S: realActivityName },
+        packageId:    { S: b.packageId },
+        date:         { S: slot.date },
+        startTime:    { S: slot.startTime },
+        endTime:      { S: slot.endTime },
+        status:       { S: "DRAFT_PROPOSAL" },
+        bookedAt:     { S: now },
+        createdAt:    { S: now },
+        updatedAt:    { S: now },
       },
-    }))
-  ));
+    }));
+
+    // 2. Delete the old PENDING_SCHEDULING record (SK is immutable in DynamoDB)
+    await ddb.send(new DeleteItemCommand({
+      TableName: TABLE_NAME,
+      Key: { pk: { S: adminSub }, sk: { S: b.sk } },
+    }));
+  }));
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -561,7 +586,7 @@ async function processGroup(
       adminSub, slot, group, assignedCoach, facilityId,
       group.headcount, realActivityName
     );
-    await patchBookings(adminSub, group.bookings, sid);
+    await patchBookings(adminSub, group.bookings, sid, assignedCoach, realActivityName, slot);
     scheduleIds.push(sid);
 
   } else {
@@ -578,7 +603,7 @@ async function processGroup(
     const sid1 = await writeDraftSchedule(
       adminSub, slot, group, assignedCoach, fid1, half1.length, realActivityName
     );
-    await patchBookings(adminSub, half1, sid1);
+    await patchBookings(adminSub, half1, sid1, assignedCoach, realActivityName, slot);
 
     // Second half — offset start time by 5 min for a distinguishable slot
     const [sh, sm]    = slot.startTime.split(":").map(Number);
@@ -612,7 +637,7 @@ async function processGroup(
     const sid2 = await writeDraftSchedule(
       adminSub, slot2, group, assignedCoach2, fid2, half2.length, realActivityName
     );
-    await patchBookings(adminSub, half2, sid2);
+    await patchBookings(adminSub, half2, sid2, assignedCoach2, realActivityName, slot2);
 
     scheduleIds.push(sid1, sid2);
   }
