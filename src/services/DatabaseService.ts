@@ -448,9 +448,39 @@ export async function deleteScheduleRecord(
   try {
     const client = generateClient<Schema>();
 
+    // Strip any accidental SCHEDULE# prefix so the sk is never double-prefixed.
+    const cleanId = scheduleId.replace('SCHEDULE#', '');
+
+    // Step 1 — fetch all child BOOKING records linked to this schedule via GSI2.
+    const bookings = await queryBookingsBySchedule(adminSub, cleanId);
+    console.log(
+      `[DB Service] deleteScheduleRecord: cascading ${bookings.length}` +
+      ` booking(s) for schedule ${cleanId}`
+    );
+
+    // Step 2 — delete all child bookings in parallel.
+    // Each booking record carries its own sk (BOOKING#<id>#MEMBER#<phone>).
+    if (bookings.length > 0) {
+      const deleteResults = await Promise.all(
+        bookings.map((b: any) =>
+          (client.models as any).ClubRecord.delete({ pk: adminSub, sk: b.sk })
+        )
+      );
+      const bookingErrors = deleteResults
+        .flatMap((r: any) => r.errors ?? [])
+        .filter(Boolean);
+      if (bookingErrors.length > 0) {
+        console.warn(
+          `[DB Service] ${bookingErrors.length} booking deletion error(s) (non-fatal):`,
+          bookingErrors
+        );
+      }
+    }
+
+    // Step 3 — delete the parent SCHEDULE record.
     const { data: deletedRecord, errors } = await (client.models as any).ClubRecord.delete({
       pk: adminSub,
-      sk: `SCHEDULE#${scheduleId}`,
+      sk: `SCHEDULE#${cleanId}`,
     });
 
     if (errors) {
@@ -466,7 +496,7 @@ export async function deleteScheduleRecord(
       throw new Error('Deleted record is not a Schedule');
     }
 
-    console.log(`[DB Service] Schedule ${scheduleId} deleted successfully`);
+    console.log(`[DB Service] Schedule ${cleanId} and ${bookings.length} booking(s) deleted successfully`);
     return deletedRecord;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to delete schedule';
