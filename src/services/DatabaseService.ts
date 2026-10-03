@@ -1787,14 +1787,31 @@ export async function dispatchScheduleNotifications(
     return;
   }
 
+  // Resolve friendly display names for Coach and Facility
+  let coachName    = schedule?.coachPhone ?? 'Our Team';
+  let facilityName = schedule?.facilityId ?? 'Studio';
+
+  try {
+    if (schedule?.coachPhone) {
+      const coachRecord = await getCoachByPhoneRecord(adminSub, schedule.coachPhone);
+      if (coachRecord?.name) coachName = coachRecord.name;
+    }
+    if (schedule?.facilityId) {
+      const facilityRecord = await getFacilityByIdRecord(adminSub, schedule.facilityId);
+      if (facilityRecord?.name) facilityName = facilityRecord.name;
+    }
+  } catch (err) {
+    console.warn('[DB Service] Could not fetch friendly names for notification:', err);
+  }
+
   // Build a fully-detailed WhatsApp message for the confirmed class
   const message =
     `✅ *Class Confirmed!*\n\n` +
     `*Activity:* ${schedule?.activityType ?? 'Dance Class'}\n` +
     `*Date:*     ${schedule?.date         ?? ''}\n` +
     `*Time:*     ${schedule?.startTime    ?? ''} - ${schedule?.endTime ?? ''}\n` +
-    `*Coach:*    ${schedule?.coachPhone   ?? ''}\n` +
-    `*Location:* ${schedule?.facilityId   ?? ''}\n\n` +
+    `*Coach:*    ${coachName}\n` +
+    `*Location:* ${facilityName}\n\n` +
     `See you on the dance floor! 💃🕺`;
 
   console.log(
@@ -1803,8 +1820,8 @@ export async function dispatchScheduleNotifications(
       adminSub,
       activityType: schedule?.activityType,
       date:         schedule?.date,
-      coachPhone:   schedule?.coachPhone,
-      facilityId:   schedule?.facilityId,
+      coachName,
+      facilityName,
       memberCount:  memberPhones.length,
     }
   );
