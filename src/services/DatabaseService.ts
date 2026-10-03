@@ -1787,37 +1787,46 @@ export async function dispatchScheduleNotifications(
     return;
   }
 
+  // Build a clean, friendly WhatsApp message for the confirmed class
+  const message =
+    `✅ *Class Confirmed!*\n\n` +
+    `*Activity:* ${schedule?.activityType ?? 'Dance Class'}\n` +
+    `*Date:* ${schedule?.date ?? ''}\n` +
+    `*Time:* ${schedule?.startTime ?? ''} - ${schedule?.endTime ?? ''}\n\n` +
+    `See you on the dance floor! 💃🕺`;
+
   console.log(
-    '[DB Service] dispatchScheduleNotifications — payload ready for WhatsApp dispatch:',
+    '[DB Service] dispatchScheduleNotifications — invoking dispatchBroadcast mutation:',
     {
       adminSub,
-      scheduleId:   schedule?.scheduleId ?? schedule?.sk,
       activityType: schedule?.activityType,
       date:         schedule?.date,
-      startTime:    schedule?.startTime,
-      endTime:      schedule?.endTime,
-      coachPhone:   schedule?.coachPhone,
       memberCount:  memberPhones.length,
-      memberPhones,
     }
   );
 
-  // ── TODO: Replace the log above with the live AppSync mutation ───────────
-  // Example (once the backend mutation exists):
-  //
-  //   const client = generateClient<Schema>();
-  //   const { errors } = await (client.mutations as any).sendScheduleNotifications({
-  //     adminSub,
-  //     scheduleId:   schedule?.scheduleId ?? schedule?.sk,
-  //     activityType: schedule?.activityType,
-  //     date:         schedule?.date,
-  //     startTime:    schedule?.startTime,
-  //     endTime:      schedule?.endTime,
-  //     coachPhone:   schedule?.coachPhone,
-  //     memberPhones,
-  //   });
-  //   if (errors?.length) throw new Error(errors[0].message);
-  // ─────────────────────────────────────────────────────────────────────────
+  const client = generateClient<Schema>();
+
+  const { errors } = await (client.mutations as any).dispatchBroadcast({
+    input: {
+      adminSub,
+      templateName:       'plain_text',
+      broadcastType:      'SCHEDULE_CONFIRMATION',
+      promotionalContent: message,
+      // Serialise as AWSJSON string — the Lambda parses it with JSON.parse()
+      targetingOptions:   JSON.stringify({ selectedPhones: memberPhones }),
+    },
+  });
+
+  if (errors?.length) {
+    const msg = errors.map((e: any) => e.message).join('; ');
+    console.error('[DB Service] dispatchScheduleNotifications errors:', msg);
+    throw new Error(`Failed to dispatch notifications: ${msg}`);
+  }
+
+  console.log(
+    `[DB Service] dispatchScheduleNotifications: ${memberPhones.length} message(s) queued successfully`
+  );
 }
 
 // ============================================================================

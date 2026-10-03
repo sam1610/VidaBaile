@@ -22,6 +22,7 @@ async function queryTargetMembers(
     status?: string;
     activePackageOnly?: boolean;
     gender?: string;
+    selectedPhones?: string[];  // when set, only these phones receive the broadcast
   }
 ): Promise<Array<{ phone: string; name: string; tier: string; status: string }>> {
   const members: Array<{ phone: string; name: string; tier: string; status: string }> = [];
@@ -43,6 +44,12 @@ async function queryTargetMembers(
 
       for (const item of res.Items ?? []) {
         const phone = item.sk?.S?.replace("MEMBER#", "") ?? "";
+        // Allowlist guard — skip member if not in the targeted phone list
+        if (
+          options.selectedPhones &&
+          options.selectedPhones.length > 0 &&
+          !options.selectedPhones.includes(phone)
+        ) continue;
         const tier = item.tier?.S ?? "STANDARD";
         const status = item.status?.S ?? "ACTIVE";
         const gender = item.gender?.S?.toUpperCase();
@@ -189,11 +196,18 @@ export const handler = async (event: any) => {
       console.log(`ℹ️ No existing BROADCAST record found for ${broadcastId} — proceeding`);
     }
 
+    // targetingOptions arrives from AppSync as AWSJSON (a string) — parse it safely
+    const parsedTarget: any =
+      typeof targetingOptions === 'string'
+        ? (() => { try { return JSON.parse(targetingOptions); } catch { return {}; } })()
+        : (targetingOptions ?? {});
+
     const targetMembers = await queryTargetMembers(adminSub, {
-      tier: targetingOptions?.tier,
-      status: targetingOptions?.status ?? "ACTIVE",
-      activePackageOnly: targetingOptions?.activePackageOnly,
-      gender: targetingOptions?.gender,
+      tier:               parsedTarget.tier,
+      status:             parsedTarget.status ?? "ACTIVE",
+      activePackageOnly:  parsedTarget.activePackageOnly,
+      gender:             parsedTarget.gender,
+      selectedPhones:     parsedTarget.selectedPhones,  // schedule confirmation allowlist
     });
 
     if (targetMembers.length === 0) {
@@ -205,7 +219,7 @@ export const handler = async (event: any) => {
       templateName,
       broadcastType,
       promotionalContent,
-      targetingOptions,
+      targetingOptions: parsedTarget,  // always pass the parsed object
       targetMemberCount: targetMembers.length,
       packageIntent,
     });
