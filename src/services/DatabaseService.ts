@@ -1787,12 +1787,14 @@ export async function dispatchScheduleNotifications(
     return;
   }
 
-  // Build a clean, friendly WhatsApp message for the confirmed class
+  // Build a fully-detailed WhatsApp message for the confirmed class
   const message =
     `✅ *Class Confirmed!*\n\n` +
     `*Activity:* ${schedule?.activityType ?? 'Dance Class'}\n` +
-    `*Date:* ${schedule?.date ?? ''}\n` +
-    `*Time:* ${schedule?.startTime ?? ''} - ${schedule?.endTime ?? ''}\n\n` +
+    `*Date:*     ${schedule?.date         ?? ''}\n` +
+    `*Time:*     ${schedule?.startTime    ?? ''} - ${schedule?.endTime ?? ''}\n` +
+    `*Coach:*    ${schedule?.coachPhone   ?? ''}\n` +
+    `*Location:* ${schedule?.facilityId   ?? ''}\n\n` +
     `See you on the dance floor! 💃🕺`;
 
   console.log(
@@ -1801,32 +1803,39 @@ export async function dispatchScheduleNotifications(
       adminSub,
       activityType: schedule?.activityType,
       date:         schedule?.date,
+      coachPhone:   schedule?.coachPhone,
+      facilityId:   schedule?.facilityId,
       memberCount:  memberPhones.length,
     }
   );
 
   const client = generateClient<Schema>();
 
-  const { errors } = await (client.mutations as any).dispatchBroadcast({
-    input: {
-      adminSub,
-      templateName:       'plain_text',
-      broadcastType:      'SCHEDULE_CONFIRMATION',
-      promotionalContent: message,
-      // Serialise as AWSJSON string — the Lambda parses it with JSON.parse()
-      targetingOptions:   JSON.stringify({ selectedPhones: memberPhones }),
-    },
-  });
+  try {
+    const { errors } = await (client.mutations as any).dispatchBroadcast({
+      input: {
+        adminSub,
+        templateName:       'plain_text',
+        broadcastType:      'SCHEDULE_CONFIRMATION',
+        promotionalContent: message,
+        // Serialised as AWSJSON — the Lambda parses it with JSON.parse()
+        targetingOptions:   JSON.stringify({ selectedPhones: memberPhones }),
+      },
+    });
 
-  if (errors?.length) {
-    const msg = errors.map((e: any) => e.message).join('; ');
-    console.error('[DB Service] dispatchScheduleNotifications errors:', msg);
-    throw new Error(`Failed to dispatch notifications: ${msg}`);
+    if (errors?.length) {
+      const msg = errors.map((e: any) => e.message).join('; ');
+      console.error('[DB Service] GraphQL Dispatch Error:', msg);
+      throw new Error(`Failed to dispatch notifications: ${msg}`);
+    }
+
+    console.log(
+      `[DB Service] dispatchScheduleNotifications: ${memberPhones.length} message(s) queued successfully`
+    );
+  } catch (error) {
+    console.error('[DB Service] GraphQL Dispatch Error:', error);
+    throw error;
   }
-
-  console.log(
-    `[DB Service] dispatchScheduleNotifications: ${memberPhones.length} message(s) queued successfully`
-  );
 }
 
 // ============================================================================

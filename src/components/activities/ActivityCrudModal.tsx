@@ -84,6 +84,7 @@ export function ActivityCrudModal({
     capacity: 45,
     activityType: '',
     currentOccupancy: 0,
+    status: 'DRAFT_PROPOSAL',  // always start as a draft; Admin must explicitly confirm
   });
 
   // Dropdown data
@@ -123,7 +124,9 @@ export function ActivityCrudModal({
           level: activity.level || 'Open Level',
           capacity: activity.capacity || 45,
           activityType: activity.activityType || '',
-          status: activity.status,
+          // Default to DRAFT_PROPOSAL when the record has no status (e.g. manually
+          // created schedules) — prevents the Approve button from being hidden.
+          status: activity.status || 'DRAFT_PROPOSAL',
         });
         setErrors({});
         setActiveTab('activity');
