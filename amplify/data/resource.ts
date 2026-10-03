@@ -1,5 +1,6 @@
 import { a, defineData, type ClientSchema } from '@aws-amplify/backend';
 import { vidaBaileSchedulingEngine } from '../functions/vidaBaileSchedulingEngine/resource';
+import { vidaBaileDispatchBroadcast } from '../functions/vidaBaileDispatchBroadcast/resource';
 
 /**
  * SINGLE-TABLE DESIGN (STD) BACKEND SCHEMA
@@ -283,6 +284,32 @@ const schema = a.schema({
     .returns(a.json())
     .authorization((allow) => [allow.groups(['Admins'])])
     .handler(a.handler.function(vidaBaileSchedulingEngine)),
+
+  /**
+   * dispatchBroadcast
+   *
+   * Triggers the broadcast dispatch Lambda to enqueue WhatsApp messages
+   * for a set of target members.
+   *
+   * The Lambda receives: event.arguments.input
+   * It returns:          JSON { success, totalQueued, broadcastId, error }
+   *
+   * Authorization: Admins Cognito group only.
+   */
+  dispatchBroadcast: a
+    .mutation()
+    .arguments({
+      adminSub:           a.string().required(),
+      templateName:       a.string().required(),
+      broadcastType:      a.string().required(),
+      promotionalContent: a.string().required(),
+      targetingOptions:   a.string(),   // AWSJSON serialised as string
+      packageIntent:      a.string(),
+      campaignId:         a.string(),
+    })
+    .returns(a.json())
+    .authorization((allow) => [allow.groups(['Admins'])])
+    .handler(a.handler.function(vidaBaileDispatchBroadcast)),
 
 });
 
