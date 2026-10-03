@@ -37,7 +37,6 @@ import {
   GetItemCommand,
   QueryCommand,
   PutItemCommand,
-  UpdateItemCommand,
 } from "@aws-sdk/client-dynamodb";
 import type {
   AttributeValue,
