@@ -1811,8 +1811,13 @@ export async function dispatchScheduleNotifications(
 
   const client = generateClient<Schema>();
 
+  console.log('[DB Service] Initiating dispatchBroadcast mutation...', {
+    adminSub,
+    memberPhones,
+  });
+
   try {
-    const { errors } = await (client.mutations as any).dispatchBroadcast({
+    const response = await (client.mutations as any).dispatchBroadcast({
       input: {
         adminSub,
         templateName:       'plain_text',
@@ -1823,17 +1828,23 @@ export async function dispatchScheduleNotifications(
       },
     });
 
-    if (errors?.length) {
-      const msg = errors.map((e: any) => e.message).join('; ');
-      console.error('[DB Service] GraphQL Dispatch Error:', msg);
-      throw new Error(`Failed to dispatch notifications: ${msg}`);
+    // Amplify Gen 2 GraphQL errors land in response.errors, not as thrown exceptions
+    if (response.errors && response.errors.length > 0) {
+      console.error(
+        '[DB Service] GraphQL Mutation Error:',
+        JSON.stringify(response.errors, null, 2)
+      );
+      alert(`Dispatch failed: ${response.errors[0].message}`);
+      return;
     }
 
+    console.log('[DB Service] Dispatch successful:', response.data);
     console.log(
       `[DB Service] dispatchScheduleNotifications: ${memberPhones.length} message(s) queued successfully`
     );
   } catch (error) {
     console.error('[DB Service] GraphQL Dispatch Error:', error);
+    alert(`Dispatch failed: ${error instanceof Error ? error.message : String(error)}`);
     throw error;
   }
 }
