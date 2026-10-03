@@ -99,6 +99,8 @@ export function ActivityCrudModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
+  // When true the modal will dispatch WhatsApp notifications after saving
+  const [notifyOnSave, setNotifyOnSave] = useState(false);
 
   // Hydrate form + fetch enrolled members when modal opens or active schedule changes.
   // Inlined as a single async effect so the booking fetch always runs with the
@@ -180,6 +182,7 @@ export function ActivityCrudModal({
         setOriginalMembers([]);
         setErrors({});
         setActiveTab('activity');
+        setNotifyOnSave(false);
       }
     };
 
@@ -355,6 +358,20 @@ export function ActivityCrudModal({
       if (addPromises.length > 0 || removePromises.length > 0) {
         await Promise.all([...addPromises, ...removePromises]);
         console.log('[ActivityCrudModal] Batched enrollment mutations completed');
+      }
+
+      // Dispatch WhatsApp notifications to all enrolled members if requested
+      if (notifyOnSave && selectedMembers.length > 0) {
+        console.log(
+          '[ActivityCrudModal] Dispatching WhatsApp notifications to',
+          selectedMembers.length, 'member(s)'
+        );
+        await DatabaseService.dispatchScheduleNotifications(
+          adminSub,
+          schedulePayload,
+          selectedMembers
+        );
+        console.log('[ActivityCrudModal] WhatsApp notifications dispatched successfully');
       }
 
       onClose();
@@ -731,7 +748,10 @@ const getTierIcon = (tier?: string) => {
                     {formData.status === 'DRAFT_PROPOSAL' && (
                       <button
                         type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, status: 'CONFIRMED' }))}
+                        onClick={() => {
+                          setFormData(prev => ({ ...prev, status: 'CONFIRMED' }));
+                          setNotifyOnSave(true);
+                        }}
                         style={{
                           padding: '5px 12px',
                           background: '#1565c0',
@@ -744,7 +764,7 @@ const getTierIcon = (tier?: string) => {
                           letterSpacing: '0.03em',
                         }}
                       >
-                        ✓ Approve &amp; Confirm
+                        ✓ Approve &amp; Send WhatsApp Notifications
                       </button>
                     )}
 
@@ -752,7 +772,10 @@ const getTierIcon = (tier?: string) => {
                     {formData.status === 'CONFIRMED' && (isEditMode && activity?.status === 'DRAFT_PROPOSAL') && (
                       <button
                         type="button"
-                        onClick={() => setFormData(prev => ({ ...prev, status: 'DRAFT_PROPOSAL' }))}
+                        onClick={() => {
+                          setFormData(prev => ({ ...prev, status: 'DRAFT_PROPOSAL' }));
+                          setNotifyOnSave(false);
+                        }}
                         style={{
                           padding: '5px 10px',
                           background: 'transparent',

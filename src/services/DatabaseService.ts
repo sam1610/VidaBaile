@@ -1746,6 +1746,81 @@ export async function queryFacilitiesForScheduling(adminSub: string): Promise<an
 
 
 // ============================================================================
+// WHATSAPP DISPATCH: Notify enrolled members about a confirmed schedule
+// ============================================================================
+
+/**
+ * dispatchScheduleNotifications
+ *
+ * Sends WhatsApp confirmation messages to all members enrolled in a schedule
+ * that has just been approved (DRAFT_PROPOSAL → CONFIRMED).
+ *
+ * ─── INTEGRATION POINT ────────────────────────────────────────────────────
+ * Replace the console.log below with the appropriate AppSync mutation or
+ * API Gateway call to invoke the backend WhatsApp Lambda (vidaBaileWhatsapp
+ * or a dedicated broadcast function).
+ *
+ * Suggested mutation:
+ *   await client.mutations.sendScheduleNotifications({
+ *     adminSub,
+ *     scheduleId: schedule.scheduleId ?? schedule.sk,
+ *     activityType: schedule.activityType,
+ *     date: schedule.date,
+ *     startTime: schedule.startTime,
+ *     endTime: schedule.endTime,
+ *     coachPhone: schedule.coachPhone,
+ *     memberPhones,
+ *   });
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ * @param adminSub   Admin's Cognito SUB (tenant partition key)
+ * @param schedule   The confirmed schedule payload
+ * @param memberPhones  Array of enrolled member phone numbers
+ */
+export async function dispatchScheduleNotifications(
+  adminSub: string,
+  schedule: any,
+  memberPhones: string[]
+): Promise<void> {
+  if (!memberPhones.length) {
+    console.log('[DB Service] dispatchScheduleNotifications: no members to notify — skipping');
+    return;
+  }
+
+  console.log(
+    '[DB Service] dispatchScheduleNotifications — payload ready for WhatsApp dispatch:',
+    {
+      adminSub,
+      scheduleId:   schedule?.scheduleId ?? schedule?.sk,
+      activityType: schedule?.activityType,
+      date:         schedule?.date,
+      startTime:    schedule?.startTime,
+      endTime:      schedule?.endTime,
+      coachPhone:   schedule?.coachPhone,
+      memberCount:  memberPhones.length,
+      memberPhones,
+    }
+  );
+
+  // ── TODO: Replace the log above with the live AppSync mutation ───────────
+  // Example (once the backend mutation exists):
+  //
+  //   const client = generateClient<Schema>();
+  //   const { errors } = await (client.mutations as any).sendScheduleNotifications({
+  //     adminSub,
+  //     scheduleId:   schedule?.scheduleId ?? schedule?.sk,
+  //     activityType: schedule?.activityType,
+  //     date:         schedule?.date,
+  //     startTime:    schedule?.startTime,
+  //     endTime:      schedule?.endTime,
+  //     coachPhone:   schedule?.coachPhone,
+  //     memberPhones,
+  //   });
+  //   if (errors?.length) throw new Error(errors[0].message);
+  // ─────────────────────────────────────────────────────────────────────────
+}
+
+// ============================================================================
 // UNIFIED EXPORT: All functions exported here (ONE export default only)
 // ============================================================================
 
@@ -2091,6 +2166,7 @@ export default {
   createBookingRecord,
   deleteBookingRecord,
   queryBookingsBySchedule,
+  dispatchScheduleNotifications,
   createPackageRecord,
   createClaimRecord,
 
