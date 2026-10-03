@@ -1811,34 +1811,6 @@ export async function dispatchScheduleNotifications(
 
   const client = generateClient<Schema>();
 
-  // Schema: dispatchBroadcast takes flat arguments (not wrapped in 'input: {}')
-  // and returns AWSJSON (a scalar) — no selection set allowed after the field name.
-  const dispatchMutation = `
-    mutation DispatchBroadcast(
-      $adminSub: String!
-      $templateName: String!
-      $broadcastType: String!
-      $promotionalContent: String!
-      $targetingOptions: String
-    ) {
-      dispatchBroadcast(
-        adminSub: $adminSub
-        templateName: $templateName
-        broadcastType: $broadcastType
-        promotionalContent: $promotionalContent
-        targetingOptions: $targetingOptions
-      )
-    }
-  `;
-
-  const mutationVariables = {
-    adminSub,
-    templateName:       'plain_text',
-    broadcastType:      'SCHEDULE_CONFIRMATION',
-    promotionalContent: message,
-    targetingOptions:   JSON.stringify({ selectedPhones: memberPhones }),
-  };
-
   console.log('[DB Service] Initiating dispatchBroadcast mutation...', {
     adminSub,
     memberCount: memberPhones.length,
@@ -1846,34 +1818,38 @@ export async function dispatchScheduleNotifications(
   });
 
   try {
-    const response = await (client as any).graphql({
-      query:     dispatchMutation,
-      variables: mutationVariables,
+    // Flat arguments — matches the schema definition exactly (no 'input' wrapper)
+    const response = await (client.mutations as any).dispatchBroadcast({
+      adminSub,
+      templateName:       'plain_text',
+      broadcastType:      'SCHEDULE_CONFIRMATION',
+      promotionalContent: message,
+      targetingOptions:   JSON.stringify({ selectedPhones: memberPhones }),
     });
 
-    // Amplify Gen 2: validation errors appear in response.errors, not as exceptions
     if (response.errors && response.errors.length > 0) {
       console.error(
-        '[DB Service] Raw GraphQL Error:',
+        '[DB Service] GraphQL Mutation Error:',
         JSON.stringify(response.errors, null, 2)
       );
       alert(`Dispatch failed: ${response.errors[0].message}`);
       return;
     }
 
-    // The Lambda returns AWSJSON — parse it to inspect success/error fields
-    const raw = response.data?.dispatchBroadcast;
-    const resultData = typeof raw === 'string' ? (() => {
-      try { return JSON.parse(raw); } catch { return null; }
-    })() : raw;
-
-    if (resultData && resultData.success === false) {
-      console.error('[DB Service] Lambda Dispatch Error:', resultData.error);
-      alert(`Dispatch failed: ${resultData.error}`);
-      return;
+    // The Lambda returns AWSJSON — parse the string to inspect success/error fields
+    const resultString = response.data?.dispatchBroadcast;
+    if (resultString) {
+      const resultData = typeof resultString === 'string'
+        ? (() => { try { return JSON.parse(resultString); } catch { return null; } })()
+        : resultString;
+      if (resultData?.success === false) {
+        console.error('[DB Service] Lambda Dispatch Error:', resultData.error);
+        alert(`Dispatch failed: ${resultData.error}`);
+        return;
+      }
     }
 
-    console.log('[DB Service] Dispatch successful:', resultData);
+    console.log('[DB Service] Dispatch successful:', response.data);
     console.log(
       `[DB Service] dispatchScheduleNotifications: ${memberPhones.length} message(s) queued successfully`
     );

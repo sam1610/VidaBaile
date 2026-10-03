@@ -135,6 +135,9 @@ export const handler = async (event: any) => {
   console.log("📢 Broadcast dispatch triggered");
 
   try {
+    // Support both wrapped 'input' payloads (scheduler) and flat AppSync arguments
+    const payload = event.arguments?.input ?? event.arguments ?? {};
+
     const {
       adminSub,
       campaignId: incomingCampaignId, // set by scheduler; if absent, generate fresh
@@ -143,7 +146,7 @@ export const handler = async (event: any) => {
       promotionalContent,
       targetingOptions,
       packageIntent,
-    } = event.arguments?.input ?? {};
+    } = payload;
 
     // Scheduler passes campaignId (= BROADCAST record sk suffix).
     // Direct Admin UI calls generate a new one here.
