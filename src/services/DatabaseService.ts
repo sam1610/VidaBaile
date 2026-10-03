@@ -1811,17 +1811,9 @@ export async function dispatchScheduleNotifications(
 
   const client = generateClient<Schema>();
 
-  // Shared variables for both the primary and fallback mutation calls
-  const mutationVariables = {
-    adminSub,
-    templateName:       'plain_text',
-    broadcastType:      'SCHEDULE_CONFIRMATION',
-    promotionalContent: message,
-    targetingOptions:   JSON.stringify({ selectedPhones: memberPhones }),
-  };
-
-  // Primary mutation — requests the full result object from the Lambda
-  const mutationWithFields = `
+  // Schema: dispatchBroadcast takes flat arguments (not wrapped in 'input: {}')
+  // and returns AWSJSON (a scalar) — no selection set allowed after the field name.
+  const dispatchMutation = `
     mutation DispatchBroadcast(
       $adminSub: String!
       $templateName: String!
@@ -1839,87 +1831,55 @@ export async function dispatchScheduleNotifications(
     }
   `;
 
+  const mutationVariables = {
+    adminSub,
+    templateName:       'plain_text',
+    broadcastType:      'SCHEDULE_CONFIRMATION',
+    promotionalContent: message,
+    targetingOptions:   JSON.stringify({ selectedPhones: memberPhones }),
+  };
+
   console.log('[DB Service] Initiating dispatchBroadcast mutation...', {
     adminSub,
     memberCount: memberPhones.length,
+    memberPhones,
   });
 
   try {
     const response = await (client as any).graphql({
-      query:     mutationWithFields,
+      query:     dispatchMutation,
       variables: mutationVariables,
     });
 
-    // Amplify Gen 2: GraphQL validation errors appear in response.errors,
-    // they do NOT throw a JavaScript exception.
+    // Amplify Gen 2: validation errors appear in response.errors, not as exceptions
     if (response.errors && response.errors.length > 0) {
       console.error(
-        '[DB Service] GraphQL Mutation Error:',
+        '[DB Service] Raw GraphQL Error:',
         JSON.stringify(response.errors, null, 2)
       );
       alert(`Dispatch failed: ${response.errors[0].message}`);
       return;
     }
 
-    // Check for Lambda-level logical failure inside the data envelope
-    const resultData = response.data?.dispatchBroadcast;
+    // The Lambda returns AWSJSON — parse it to inspect success/error fields
+    const raw = response.data?.dispatchBroadcast;
+    const resultData = typeof raw === 'string' ? (() => {
+      try { return JSON.parse(raw); } catch { return null; }
+    })() : raw;
+
     if (resultData && resultData.success === false) {
       console.error('[DB Service] Lambda Dispatch Error:', resultData.error);
       alert(`Dispatch failed: ${resultData.error}`);
       return;
     }
 
-    console.log('[DB Service] Dispatch successful:', response.data);
+    console.log('[DB Service] Dispatch successful:', resultData);
     console.log(
       `[DB Service] dispatchScheduleNotifications: ${memberPhones.length} message(s) queued successfully`
     );
   } catch (error: any) {
-    const errMsg: string = error?.message ?? String(error);
-
-    // 'must not have a selection' means the schema returns a scalar (AWSJSON)
-    // and we tried to select sub-fields. Re-try without a selection set.
-    if (errMsg.includes('must not have a selection')) {
-      console.warn(
-        '[DB Service] Schema returns scalar — retrying without selection set'
-      );
-      const mutationScalar = `
-        mutation DispatchBroadcastScalar(
-          $adminSub: String!
-          $templateName: String!
-          $broadcastType: String!
-          $promotionalContent: String!
-          $targetingOptions: String
-        ) {
-          dispatchBroadcast(
-            adminSub: $adminSub
-            templateName: $templateName
-            broadcastType: $broadcastType
-            promotionalContent: $promotionalContent
-            targetingOptions: $targetingOptions
-          )
-        }
-      `;
-      try {
-        const fallback = await (client as any).graphql({
-          query:     mutationScalar,
-          variables: mutationVariables,
-        });
-        if (fallback.errors?.length) {
-          console.error('[DB Service] Fallback GraphQL Error:', JSON.stringify(fallback.errors, null, 2));
-          alert(`Dispatch failed: ${fallback.errors[0].message}`);
-          return;
-        }
-        console.log('[DB Service] Fallback dispatch successful:', fallback.data);
-        return;
-      } catch (fallbackErr: any) {
-        console.error('[DB Service] Fallback dispatch failed:', fallbackErr);
-        alert(`Dispatch failed: ${fallbackErr?.message ?? String(fallbackErr)}`);
-        return;
-      }
-    }
-
     console.error('[DB Service] GraphQL Dispatch Error:', error);
-    alert(`Dispatch failed: ${errMsg}`);
+    alert(`Dispatch failed: ${error?.message ?? String(error)}`);
     throw error;
   }
 }
