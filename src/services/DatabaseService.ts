@@ -2250,6 +2250,10 @@ export default {
   queryFacilitiesByStatusRecord,
   observeFacilitiesRecord,
 
+  // Profile Operations
+  getProfileRecord,
+  updateProfileRecord,
+
   // Catalog Operations (Package Templates)
   createCatalogTemplate,
   updateCatalogTemplate,
@@ -2271,6 +2275,70 @@ export default {
   observeCampaigns,
   updateCampaignStatus,
 };
+
+// ============================================================================
+// PROFILE OPERATIONS: Studio name + logo stored in PROFILE record
+//   pk: adminSub  sk: PROFILE
+//   name        → club display name
+//   description → Base64 logo data URL (reuses existing string field)
+// ============================================================================
+
+export interface StudioProfile {
+  clubName: string;
+  logoBase64: string;  // data:image/...;base64,... or empty string
+}
+
+/**
+ * Fetch the studio PROFILE record (pk=adminSub, sk='PROFILE').
+ * Returns a StudioProfile with sensible defaults when the record is absent.
+ */
+export async function getProfileRecord(adminSub: string): Promise<StudioProfile> {
+  try {
+    const client = generateClient<Schema>();
+    const { data: item, errors } = await (client.models as any).ClubRecord.get({
+      pk: adminSub,
+      sk: 'PROFILE',
+    });
+    if (errors?.length) {
+      console.warn('[DB Service] getProfileRecord errors:', errors);
+    }
+    return {
+      clubName:   (item as any)?.name        ?? 'My Dance Studio',
+      logoBase64: (item as any)?.description ?? '',
+    };
+  } catch (err) {
+    console.warn('[DB Service] getProfileRecord failed:', err);
+    return { clubName: 'My Dance Studio', logoBase64: '' };
+  }
+}
+
+/**
+ * Create or overwrite the studio PROFILE record.
+ * Uses update-or-create semantics (UpdateItemCommand upsert).
+ */
+export async function updateProfileRecord(
+  adminSub: string,
+  profile: Partial<StudioProfile>
+): Promise<void> {
+  try {
+    const client = generateClient<Schema>();
+    const { errors } = await (client.models as any).ClubRecord.update({
+      pk:          adminSub,
+      sk:          'PROFILE',
+      entityType:  'PROFILE',
+      name:        profile.clubName,
+      description: profile.logoBase64,  // Base64 logo stored in description field
+      updatedAt:   new Date().toISOString(),
+    });
+    if (errors?.length) {
+      throw new Error(errors[0]?.message ?? 'Failed to update profile');
+    }
+    console.log('[DB Service] updateProfileRecord: saved successfully');
+  } catch (err) {
+    console.error('[DB Service] updateProfileRecord failed:', err);
+    throw err;
+  }
+}
 
 /**
  * Query all bookings for a specific member

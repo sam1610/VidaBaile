@@ -9,9 +9,9 @@ import './ComprehensiveClubConsole.css';
 // ── Types ─────────────────────────────────────────────────────────────────────
 
 interface ActivityItem {
-  id: string;
+  id:   string;
   text: string;
-  ts: string;     // ISO — used for sort
+  ts:   string;   // ISO — used for sort
   icon: string;
 }
 
@@ -21,14 +21,12 @@ function todayStr(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-/** Returns the YYYY-MM-DD seven days from today */
 function sevenDaysFromNow(): string {
   const d = new Date();
   d.setDate(d.getDate() + 7);
   return d.toISOString().split('T')[0];
 }
 
-/** Format ISO timestamp as "Sep 17, 2026 · 14:30" */
 function fmtTs(iso: string): string {
   try {
     return new Date(iso).toLocaleString(undefined, {
@@ -43,41 +41,48 @@ function fmtTs(iso: string): string {
 export const ComprehensiveClubConsole: React.FC = () => {
   const { adminSub } = useAdminSub();
 
-  // ── Metric state ────────────────────────────────────────────────────────────
+  // ── Profile (club name + logo) ───────────────────────────────────────────
+  const [clubName,    setClubName]    = useState<string>('My Dance Studio');
+  const [logoBase64,  setLogoBase64]  = useState<string>('');
+
+  // ── Metric state ─────────────────────────────────────────────────────────
   const [activeMembers,   setActiveMembers]   = useState<number | null>(null);
   const [upcomingClasses, setUpcomingClasses] = useState<number | null>(null);
-  const [bookingsToday,   setBookingsToday]   = useState<number | null>(null);
+  const [classesToday,    setClassesToday]    = useState<number | null>(null);
   const [loadingMetrics,  setLoadingMetrics]  = useState(true);
 
-  // ── Recent activity feed ────────────────────────────────────────────────────
+  // ── Recent activity feed ─────────────────────────────────────────────────
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
-
-  // ── UI state ────────────────────────────────────────────────────────────────
-  const [selectedClub, setSelectedClub] = useState('club-001');
-  const [searchQuery,  setSearchQuery]  = useState('');
 
   const today = todayStr();
 
-  // ── Active members (one-shot query) ─────────────────────────────────────────
+  // ── Load PROFILE record ───────────────────────────────────────────────────
+  useEffect(() => {
+    if (!adminSub) return;
+    DatabaseService.getProfileRecord(adminSub)
+      .then(({ clubName: cn, logoBase64: lb }) => {
+        if (cn) setClubName(cn);
+        if (lb) setLogoBase64(lb);
+      })
+      .catch((err) => console.warn('[Home] getProfileRecord failed:', err));
+  }, [adminSub]);
+
+  // ── Active members ────────────────────────────────────────────────────────
   useEffect(() => {
     if (!adminSub) return;
     DatabaseService.queryActiveMembersRecord(adminSub)
-      .then((members) => {
-        setActiveMembers(members.length);
-      })
+      .then((members) => setActiveMembers(members.length))
       .catch((err) => {
         console.error('[Home] queryActiveMembersRecord failed:', err);
         setActiveMembers(0);
       });
   }, [adminSub]);
 
-  // ── Schedules subscription → upcoming classes + bookings today + activity ────
+  // ── Schedules subscription → upcoming + today + activity ─────────────────
   useEffect(() => {
     if (!adminSub) return;
-
     setLoadingMetrics(true);
 
-    // Subscribe to schedules over the next 7 days
     const unsubscribe = DatabaseService.observeSchedulesByDateRange(
       adminSub,
       today,
@@ -86,18 +91,9 @@ export const ComprehensiveClubConsole: React.FC = () => {
         const schedules = scheduleItems.filter(
           (s: any) => s.entityType === 'SCHEDULE' && s.sk?.startsWith('SCHEDULE#')
         );
+        setUpcomingClasses(schedules.filter((s: any) => s.date && s.date >= today).length);
+        setClassesToday(schedules.filter((s: any) => s.date === today).length);
 
-        // Upcoming = all schedules with date >= today
-        const upcoming = schedules.filter(
-          (s: any) => s.date && s.date >= today
-        );
-        setUpcomingClasses(upcoming.length);
-
-        // Bookings today = schedules whose date equals today
-        const todayClasses = schedules.filter((s: any) => s.date === today);
-        setBookingsToday(todayClasses.length);
-
-        // Build activity items from recently-created schedules
         const scheduleActivity: ActivityItem[] = schedules
           .filter((s: any) => s.createdAt)
           .map((s: any) => ({
@@ -116,7 +112,7 @@ export const ComprehensiveClubConsole: React.FC = () => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminSub, today]);
 
-  // ── Members subscription → recent joins in activity feed ────────────────────
+  // ── Members subscription → activity feed ─────────────────────────────────
   useEffect(() => {
     if (!adminSub) return;
 
@@ -131,7 +127,6 @@ export const ComprehensiveClubConsole: React.FC = () => {
             ts:   m.createdAt,
             icon: '👤',
           }));
-
         setRecentActivity((prev) => mergeActivity(prev, joinActivity, 'member'));
       }
     );
@@ -139,66 +134,64 @@ export const ComprehensiveClubConsole: React.FC = () => {
     return () => unsubscribe();
   }, [adminSub]);
 
-  // ── Render helpers ───────────────────────────────────────────────────────────
-
-  const handleRefresh = () => {
-    // Force refetch by clearing and letting effects re-run on next adminSub cycle
-    setActiveMembers(null);
-    setUpcomingClasses(null);
-    setBookingsToday(null);
-    setRecentActivity([]);
-    if (adminSub) {
-      DatabaseService.queryActiveMembersRecord(adminSub)
-        .then((m) => setActiveMembers(m.length))
-        .catch(() => setActiveMembers(0));
-    }
-  };
-
-  // Top-10 most recent items, sorted descending by timestamp
   const topActivity = [...recentActivity]
     .sort((a, b) => b.ts.localeCompare(a.ts))
     .slice(0, 10);
 
   return (
     <div className="home-dashboard">
-      {/* Header */}
-      <div className="dashboard-header">
-        <div className="header-left">
-          <h1 className="header-title">🎵 La Vida Dance Studio</h1>
-          <div className="header-branch-selector">
-            <label htmlFor="club-select">Multi-Branches:</label>
-            <select
-              id="club-select"
-              value={selectedClub}
-              onChange={(e) => setSelectedClub(e.target.value)}
-            >
-              <option value="club-001">Main Branch</option>
-              <option value="club-002">Branch B</option>
-              <option value="club-003">Branch C</option>
-            </select>
-          </div>
-        </div>
-
-        <div className="header-center">
-          <input
-            type="text"
-            placeholder="Search Clients & Bookings"
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="header-search"
+      {/* ── Streamlined Header — logo + club name only ── */}
+      <div className="dashboard-header" style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: '12px',
+        padding: '12px 20px',
+        borderBottom: '1px solid #e5e7eb',
+        background: '#fff',
+      }}>
+        {/* Logo */}
+        {logoBase64 ? (
+          <img
+            src={logoBase64}
+            alt="Studio logo"
+            style={{
+              width: '44px',
+              height: '44px',
+              borderRadius: '8px',
+              objectFit: 'cover',
+              border: '1px solid #e0e0e0',
+            }}
           />
-        </div>
+        ) : (
+          <div style={{
+            width: '44px',
+            height: '44px',
+            borderRadius: '8px',
+            background: '#2e3b50',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: '22px',
+            flexShrink: 0,
+          }}>
+            🎵
+          </div>
+        )}
 
-        <div className="header-right">
-          <button className="header-refresh" onClick={handleRefresh}>
-            🔄 Refresh
-          </button>
-        </div>
+        <h1 style={{
+          margin: 0,
+          fontSize: '17px',
+          fontWeight: '700',
+          color: '#2e3b50',
+          letterSpacing: '-0.01em',
+        }}>
+          {clubName}
+        </h1>
       </div>
 
       {/* Main Content */}
       <div className="dashboard-content">
-        {/* Quick Stats Grid — 3 columns, no Revenue card */}
+        {/* Quick Stats Grid — 3 columns */}
         <div className="quick-stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
           <div className="stat-card">
             <div className="stat-label">Active Members</div>
@@ -219,7 +212,7 @@ export const ComprehensiveClubConsole: React.FC = () => {
           <div className="stat-card">
             <div className="stat-label">Classes Today</div>
             <div className="stat-value">
-              {loadingMetrics || bookingsToday === null ? '…' : bookingsToday}
+              {loadingMetrics || classesToday === null ? '…' : classesToday}
             </div>
             <Badge variant="info" text="Today" size="small" />
           </div>
@@ -227,7 +220,6 @@ export const ComprehensiveClubConsole: React.FC = () => {
 
         {/* Two Column Layout */}
         <div className="dashboard-layout">
-          {/* Left: Main Content */}
           <div className="dashboard-main">
             <div className="dashboard-section">
               <h2 className="section-title">📊 Overview</h2>
@@ -244,7 +236,10 @@ export const ComprehensiveClubConsole: React.FC = () => {
                   No recent activity yet.
                 </p>
               ) : (
-                <ul style={{ fontSize: '12px', color: '#555', lineHeight: 1.9, paddingLeft: '16px', margin: 0 }}>
+                <ul style={{
+                  fontSize: '12px', color: '#555', lineHeight: 1.9,
+                  paddingLeft: '16px', margin: 0,
+                }}>
                   {topActivity.map((item) => (
                     <li key={item.id} style={{ marginBottom: '4px' }}>
                       <span style={{ marginRight: '6px' }}>{item.icon}</span>
@@ -259,7 +254,6 @@ export const ComprehensiveClubConsole: React.FC = () => {
             </div>
           </div>
 
-          {/* Right: Agent AI Dock */}
           <div className="dashboard-sidebar">
             <AgentAIDock />
           </div>
@@ -270,14 +264,11 @@ export const ComprehensiveClubConsole: React.FC = () => {
 };
 
 // ── Merge helper ──────────────────────────────────────────────────────────────
-// Replace all items from a given source category, keeping items from other sources.
-// This prevents duplicates when a subscription re-fires with the same data.
 function mergeActivity(
-  prev:     ActivityItem[],
-  incoming: ActivityItem[],
+  prev:         ActivityItem[],
+  incoming:     ActivityItem[],
   sourcePrefix: string
 ): ActivityItem[] {
-  // Tag incoming items with a source prefix so dedup is per-category
   const tagged = incoming.map((i) => ({ ...i, id: `${sourcePrefix}::${i.id}` }));
   const kept   = prev.filter((i) => !i.id.startsWith(`${sourcePrefix}::`));
   return [...kept, ...tagged];
