@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import React from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../hooks/useAppSync';
@@ -13,7 +13,7 @@ import './ComprehensiveClubConsole.css';
 interface ActivityItem {
   id:   string;
   text: string;
-  ts:   string;   // ISO — used for sort
+  ts:   string;   // ISO — used for sort and date filtering
   icon: string;
 }
 
@@ -23,7 +23,11 @@ function todayStr(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-
+function sevenDaysLater(from: string): string {
+  const d = new Date(from);
+  d.setDate(d.getDate() + 7);
+  return d.toISOString().split('T')[0];
+}
 
 function fmtTs(iso: string): string {
   try {
@@ -84,13 +88,15 @@ export const ComprehensiveClubConsole: React.FC = () => {
   // ── Activity feed ─────────────────────────────────────────────────────────
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
 
-  // Stable date strings — only recomputed when the day actually changes.
-  // Using useMemo with no deps means they're computed once per mount.
-  // A ref stores the current day so we can detect day-change on re-renders.
-  // const today       = useMemo(() => todayStr(),                   []);
-  // const sevenAhead  = useMemo(() => sevenDaysLater(today),        [today]);
+  // ── Date filter state ────────────────────────────────────────────────────
+  const [filterStartDate, setFilterStartDate] = useState<string>('');
+  const [filterEndDate,   setFilterEndDate]   = useState<string>('');
 
-  // Ref to track current adminSub inside subscriptions without adding it to deps
+  // Stable date strings — computed once per mount
+  const today      = useMemo(() => todayStr(),            []);
+  const sevenAhead = useMemo(() => sevenDaysLater(today), [today]);
+
+  // Ref for adminSub inside subscriptions
   const adminSubRef = useRef(adminSub);
   useEffect(() => { adminSubRef.current = adminSub; }, [adminSub]);
 
@@ -105,7 +111,7 @@ export const ComprehensiveClubConsole: React.FC = () => {
       .catch((err) => console.warn('[Home] getProfileRecord failed:', err));
   }, [adminSub]);
 
-  // ── Active members count (one-shot) ──────────────────────────────────────
+  // ── Active members count (one-shot) ───────────────────────────────────────
   useEffect(() => {
     if (!adminSub) return;
     DatabaseService.queryActiveMembersRecord(adminSub)
@@ -114,24 +120,18 @@ export const ComprehensiveClubConsole: React.FC = () => {
   }, [adminSub]);
 
   // ── Unified real-time subscription: SCHEDULE + BOOKING + MEMBER ───────────
-  // Single observeQuery covering the whole tenant partition avoids the
-  // "stale today reference" tear-down loop and gets all entity types in one
-  // subscription, updating metrics and the activity feed together.
   useEffect(() => {
     if (!adminSub) return;
     setLoadingMetrics(true);
 
     const client = generateClient<Schema>();
 
-    // Subscribe to all ClubRecord items belonging to this admin.
-    // Client-side filter is applied in the next() handler.
     const subscription = (client.models as any).ClubRecord.observeQuery({
       filter: { pk: { eq: adminSub } },
     }).subscribe({
       next: ({ items }: { items: any[] }) => {
-        const currentToday = todayStr(); // always fresh inside callback
+        const currentToday = todayStr();
 
-        // ── Metrics from SCHEDULE records ──────────────────────────────────
         const schedules = items.filter(
           (r: any) => r?.entityType === 'SCHEDULE' && r.sk?.startsWith('SCHEDULE#')
         );
@@ -142,13 +142,11 @@ export const ComprehensiveClubConsole: React.FC = () => {
           schedules.filter((s: any) => s.date === currentToday).length
         );
 
-        // ── Active member count from MEMBER records ────────────────────────
         const members = items.filter(
           (r: any) => r?.entityType === 'MEMBER' && r.status === 'ACTIVE'
         );
         setActiveMembers(members.length);
 
-        // ── Activity feed: SCHEDULE + BOOKING + MEMBER ────────────────────
         const activityItems: ActivityItem[] = items
           .filter((r: any) =>
             r?.entityType === 'SCHEDULE' ||
@@ -158,11 +156,9 @@ export const ComprehensiveClubConsole: React.FC = () => {
           .map(itemToActivity)
           .filter((x): x is ActivityItem => x !== null);
 
-        // Deduplicate by id, then sort by ts desc, cap at 15
         const byId = new Map(activityItems.map((a) => [a.id, a]));
         const sorted = [...byId.values()]
-          .sort((a, b) => b.ts.localeCompare(a.ts))
-          .slice(0, 15);
+          .sort((a, b) => b.ts.localeCompare(a.ts));
 
         setRecentActivity(sorted);
         setLoadingMetrics(false);
@@ -173,15 +169,18 @@ export const ComprehensiveClubConsole: React.FC = () => {
       },
     });
 
-    return () => {
-      subscription.unsubscribe();
-    };
-    // adminSub is stable per auth session — today/sevenAhead used inside
-    // callback with fresh todayStr() call so they don't need to be deps.
+    return () => { subscription.unsubscribe(); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminSub]);
 
-  const topActivity = recentActivity.slice(0, 10);
+  // ── Derive filtered activity list ─────────────────────────────────────────
+  // Extract the date part (first 10 chars) from the ISO ts string for comparison.
+  const filteredActivity = recentActivity.filter((item) => {
+    const date = item.ts.slice(0, 10);
+    if (filterStartDate && date < filterStartDate) return false;
+    if (filterEndDate   && date > filterEndDate)   return false;
+    return true;
+  });
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -249,46 +248,97 @@ export const ComprehensiveClubConsole: React.FC = () => {
 
         {/* Two-column layout */}
         <div className="dashboard-layout">
+          {/* Left — Recent Activity (no Overview block) */}
           <div className="dashboard-main">
             <div className="dashboard-section">
-              <h2 className="section-title">📊 Overview</h2>
-              <p style={{ color: '#666', fontSize: '12px' }}>
-                Select a tab above to view Activities, Facilities, Appointments,
-                Packages, Members, and Marketing campaigns.
-              </p>
-            </div>
-
-            <div className="dashboard-section">
               <h2 className="section-title">🔄 Recent Activity</h2>
-              {loadingMetrics ? (
-                <p style={{ fontSize: '12px', color: '#bbb', fontStyle: 'italic' }}>
-                  Loading…
-                </p>
-              ) : topActivity.length === 0 ? (
-                <p style={{ fontSize: '12px', color: '#bbb', fontStyle: 'italic' }}>
-                  No recent activity yet.
-                </p>
-              ) : (
-                <ul style={{
-                  fontSize: '12px', color: '#555', lineHeight: 1.9,
-                  paddingLeft: '16px', margin: 0,
-                }}>
-                  {topActivity.map((item) => (
-                    <li key={item.id} style={{ marginBottom: '4px' }}>
-                      <span style={{ marginRight: '6px' }}>{item.icon}</span>
-                      <span>{item.text}</span>
-                      <span style={{
-                        color: '#bbb', marginLeft: '8px', fontSize: '10px',
-                      }}>
-                        {fmtTs(item.ts)}
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              )}
+
+              {/* Date interval picker */}
+              <div style={{
+                display: 'flex', alignItems: 'center', gap: '8px',
+                flexWrap: 'wrap', marginBottom: '4px',
+              }}>
+                <label style={{ fontSize: '11px', fontWeight: '600', color: '#555' }}>
+                  From:
+                </label>
+                <input
+                  type="date"
+                  value={filterStartDate}
+                  onChange={(e) => setFilterStartDate(e.target.value)}
+                  style={{
+                    padding: '4px 7px', fontSize: '11px',
+                    border: '1px solid #ddd', borderRadius: '4px',
+                  }}
+                />
+                <label style={{ fontSize: '11px', fontWeight: '600', color: '#555' }}>
+                  To:
+                </label>
+                <input
+                  type="date"
+                  value={filterEndDate}
+                  min={filterStartDate || undefined}
+                  onChange={(e) => setFilterEndDate(e.target.value)}
+                  style={{
+                    padding: '4px 7px', fontSize: '11px',
+                    border: '1px solid #ddd', borderRadius: '4px',
+                  }}
+                />
+                {(filterStartDate || filterEndDate) && (
+                  <button
+                    onClick={() => { setFilterStartDate(''); setFilterEndDate(''); }}
+                    style={{
+                      padding: '3px 9px', fontSize: '11px',
+                      background: '#f0f0f0', border: '1px solid #ddd',
+                      borderRadius: '4px', cursor: 'pointer', color: '#555',
+                    }}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+
+              {/* Scrollable activity list */}
+              <div style={{
+                maxHeight:   '500px',
+                overflowY:   'auto',
+                paddingRight: '10px',
+                borderTop:   '1px solid lightgray',
+                paddingTop:  '10px',
+                marginTop:   '10px',
+              }}>
+                {loadingMetrics ? (
+                  <p style={{ fontSize: '12px', color: '#bbb', fontStyle: 'italic' }}>
+                    Loading…
+                  </p>
+                ) : filteredActivity.length === 0 ? (
+                  <p style={{ fontSize: '12px', color: '#bbb', fontStyle: 'italic' }}>
+                    {recentActivity.length > 0
+                      ? 'No activity in this date range.'
+                      : 'No recent activity yet.'}
+                  </p>
+                ) : (
+                  <ul style={{
+                    fontSize: '12px', color: '#555', lineHeight: 1.9,
+                    paddingLeft: '16px', margin: 0,
+                  }}>
+                    {filteredActivity.map((item) => (
+                      <li key={item.id} style={{ marginBottom: '4px' }}>
+                        <span style={{ marginRight: '6px' }}>{item.icon}</span>
+                        <span>{item.text}</span>
+                        <span style={{
+                          color: '#bbb', marginLeft: '8px', fontSize: '10px',
+                        }}>
+                          {fmtTs(item.ts)}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </div>
             </div>
           </div>
 
+          {/* Right — Agent AI Dock */}
           <div className="dashboard-sidebar">
             <AgentAIDock />
           </div>

@@ -387,7 +387,11 @@ export const handler = async (event: any) => {
         return { statusCode: 200, body: "OK" };
       }
 
-      if (!campaignId) {
+      // Only infer campaign context for plain-text replies.
+      // Button clicks and Flow submissions carry their own explicit context;
+      // applying campaign attribution to them would falsely link organic
+      // interactive sessions to the most recent marketing broadcast.
+      if (!campaignId && msgType === "text") {
         try {
           const normalizedPhone = senderPhone.startsWith("+") ? senderPhone : `+${senderPhone}`;
           const recentBroadcasts = await ddb.send(
