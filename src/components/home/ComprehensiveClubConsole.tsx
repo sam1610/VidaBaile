@@ -1,4 +1,4 @@
-import { useEffect, useState, useMemo, useRef } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import React from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../hooks/useAppSync';
@@ -23,11 +23,7 @@ function todayStr(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-function sevenDaysLater(from: string): string {
-  const d = new Date(from);
-  d.setDate(d.getDate() + 7);
-  return d.toISOString().split('T')[0];
-}
+
 
 function fmtTs(iso: string): string {
   try {
@@ -91,8 +87,8 @@ export const ComprehensiveClubConsole: React.FC = () => {
   // Stable date strings — only recomputed when the day actually changes.
   // Using useMemo with no deps means they're computed once per mount.
   // A ref stores the current day so we can detect day-change on re-renders.
-  const today       = useMemo(() => todayStr(),                   []);
-  const sevenAhead  = useMemo(() => sevenDaysLater(today),        [today]);
+  // const today       = useMemo(() => todayStr(),                   []);
+  // const sevenAhead  = useMemo(() => sevenDaysLater(today),        [today]);
 
   // Ref to track current adminSub inside subscriptions without adding it to deps
   const adminSubRef = useRef(adminSub);
