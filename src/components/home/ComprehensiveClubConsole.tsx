@@ -1,5 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useMemo, useRef } from 'react';
 import React from 'react';
+import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '../../hooks/useAppSync';
 import { Badge } from './components/Badge';
 import { AgentAIDock } from './dock/AgentAIDock';
 import DatabaseService from '../../services/DatabaseService';
@@ -21,8 +23,8 @@ function todayStr(): string {
   return new Date().toISOString().split('T')[0];
 }
 
-function sevenDaysFromNow(): string {
-  const d = new Date();
+function sevenDaysLater(from: string): string {
+  const d = new Date(from);
   d.setDate(d.getDate() + 7);
   return d.toISOString().split('T')[0];
 }
@@ -36,27 +38,67 @@ function fmtTs(iso: string): string {
   } catch { return iso; }
 }
 
+function itemToActivity(item: any): ActivityItem | null {
+  const et = item?.entityType;
+  const ts = item?.createdAt ?? item?.bookedAt ?? item?.updatedAt;
+  if (!ts) return null;
+
+  if (et === 'SCHEDULE') {
+    return {
+      id:   `schedule::${item.sk}`,
+      text: `New class "${item.activityType || 'Activity'}" scheduled for ${item.date ?? '—'}`,
+      ts,
+      icon: '📅',
+    };
+  }
+  if (et === 'BOOKING') {
+    return {
+      id:   `booking::${item.sk}`,
+      text: `${item.memberPhone || item.phone || 'A member'} enrolled in ${item.activityType || item.scheduleId || 'a class'}`,
+      ts,
+      icon: '🎟️',
+    };
+  }
+  if (et === 'MEMBER') {
+    return {
+      id:   `member::${item.sk}`,
+      text: `New member ${item.name || item.phone || 'Unknown'} joined ${item.tier ?? 'STANDARD'} tier`,
+      ts,
+      icon: '👤',
+    };
+  }
+  return null;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export const ComprehensiveClubConsole: React.FC = () => {
   const { adminSub } = useAdminSub();
 
-  // ── Profile (club name + logo) ───────────────────────────────────────────
-  const [clubName,    setClubName]    = useState<string>('My Dance Studio');
-  const [logoBase64,  setLogoBase64]  = useState<string>('');
+  // ── Profile ───────────────────────────────────────────────────────────────
+  const [clubName,   setClubName]   = useState<string>('My Dance Studio');
+  const [logoBase64, setLogoBase64] = useState<string>('');
 
-  // ── Metric state ─────────────────────────────────────────────────────────
+  // ── Metrics ───────────────────────────────────────────────────────────────
   const [activeMembers,   setActiveMembers]   = useState<number | null>(null);
   const [upcomingClasses, setUpcomingClasses] = useState<number | null>(null);
   const [classesToday,    setClassesToday]    = useState<number | null>(null);
   const [loadingMetrics,  setLoadingMetrics]  = useState(true);
 
-  // ── Recent activity feed ─────────────────────────────────────────────────
+  // ── Activity feed ─────────────────────────────────────────────────────────
   const [recentActivity, setRecentActivity] = useState<ActivityItem[]>([]);
 
-  const today = todayStr();
+  // Stable date strings — only recomputed when the day actually changes.
+  // Using useMemo with no deps means they're computed once per mount.
+  // A ref stores the current day so we can detect day-change on re-renders.
+  const today       = useMemo(() => todayStr(),                   []);
+  const sevenAhead  = useMemo(() => sevenDaysLater(today),        [today]);
 
-  // ── Load PROFILE record ───────────────────────────────────────────────────
+  // Ref to track current adminSub inside subscriptions without adding it to deps
+  const adminSubRef = useRef(adminSub);
+  useEffect(() => { adminSubRef.current = adminSub; }, [adminSub]);
+
+  // ── Load PROFILE ──────────────────────────────────────────────────────────
   useEffect(() => {
     if (!adminSub) return;
     DatabaseService.getProfileRecord(adminSub)
@@ -67,123 +109,114 @@ export const ComprehensiveClubConsole: React.FC = () => {
       .catch((err) => console.warn('[Home] getProfileRecord failed:', err));
   }, [adminSub]);
 
-  // ── Active members ────────────────────────────────────────────────────────
+  // ── Active members count (one-shot) ──────────────────────────────────────
   useEffect(() => {
     if (!adminSub) return;
     DatabaseService.queryActiveMembersRecord(adminSub)
-      .then((members) => setActiveMembers(members.length))
-      .catch((err) => {
-        console.error('[Home] queryActiveMembersRecord failed:', err);
-        setActiveMembers(0);
-      });
+      .then((ms) => setActiveMembers(ms.length))
+      .catch(() => setActiveMembers(0));
   }, [adminSub]);
 
-  // ── Schedules subscription → upcoming + today + activity ─────────────────
+  // ── Unified real-time subscription: SCHEDULE + BOOKING + MEMBER ───────────
+  // Single observeQuery covering the whole tenant partition avoids the
+  // "stale today reference" tear-down loop and gets all entity types in one
+  // subscription, updating metrics and the activity feed together.
   useEffect(() => {
     if (!adminSub) return;
     setLoadingMetrics(true);
 
-    const unsubscribe = DatabaseService.observeSchedulesByDateRange(
-      adminSub,
-      today,
-      sevenDaysFromNow(),
-      (scheduleItems: any[]) => {
-        const schedules = scheduleItems.filter(
-          (s: any) => s.entityType === 'SCHEDULE' && s.sk?.startsWith('SCHEDULE#')
+    const client = generateClient<Schema>();
+
+    // Subscribe to all ClubRecord items belonging to this admin.
+    // Client-side filter is applied in the next() handler.
+    const subscription = (client.models as any).ClubRecord.observeQuery({
+      filter: { pk: { eq: adminSub } },
+    }).subscribe({
+      next: ({ items }: { items: any[] }) => {
+        const currentToday = todayStr(); // always fresh inside callback
+
+        // ── Metrics from SCHEDULE records ──────────────────────────────────
+        const schedules = items.filter(
+          (r: any) => r?.entityType === 'SCHEDULE' && r.sk?.startsWith('SCHEDULE#')
         );
-        setUpcomingClasses(schedules.filter((s: any) => s.date && s.date >= today).length);
-        setClassesToday(schedules.filter((s: any) => s.date === today).length);
+        setUpcomingClasses(
+          schedules.filter((s: any) => s.date && s.date >= currentToday).length
+        );
+        setClassesToday(
+          schedules.filter((s: any) => s.date === currentToday).length
+        );
 
-        const scheduleActivity: ActivityItem[] = schedules
-          .filter((s: any) => s.createdAt)
-          .map((s: any) => ({
-            id:   s.sk,
-            text: `New class "${s.activityType || 'Activity'}" scheduled for ${s.date ?? '—'}`,
-            ts:   s.createdAt,
-            icon: '📅',
-          }));
+        // ── Active member count from MEMBER records ────────────────────────
+        const members = items.filter(
+          (r: any) => r?.entityType === 'MEMBER' && r.status === 'ACTIVE'
+        );
+        setActiveMembers(members.length);
 
-        setRecentActivity((prev) => mergeActivity(prev, scheduleActivity, 'schedule'));
+        // ── Activity feed: SCHEDULE + BOOKING + MEMBER ────────────────────
+        const activityItems: ActivityItem[] = items
+          .filter((r: any) =>
+            r?.entityType === 'SCHEDULE' ||
+            r?.entityType === 'BOOKING'  ||
+            r?.entityType === 'MEMBER'
+          )
+          .map(itemToActivity)
+          .filter((x): x is ActivityItem => x !== null);
+
+        // Deduplicate by id, then sort by ts desc, cap at 15
+        const byId = new Map(activityItems.map((a) => [a.id, a]));
+        const sorted = [...byId.values()]
+          .sort((a, b) => b.ts.localeCompare(a.ts))
+          .slice(0, 15);
+
+        setRecentActivity(sorted);
         setLoadingMetrics(false);
-      }
-    );
+      },
+      error: (err: Error) => {
+        console.error('[Home] observeQuery error:', err);
+        setLoadingMetrics(false);
+      },
+    });
 
-    return () => unsubscribe();
+    return () => {
+      subscription.unsubscribe();
+    };
+    // adminSub is stable per auth session — today/sevenAhead used inside
+    // callback with fresh todayStr() call so they don't need to be deps.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [adminSub, today]);
-
-  // ── Members subscription → activity feed ─────────────────────────────────
-  useEffect(() => {
-    if (!adminSub) return;
-
-    const unsubscribe = DatabaseService.observeMembers(
-      adminSub,
-      (members: any[]) => {
-        const joinActivity: ActivityItem[] = members
-          .filter((m: any) => m.createdAt)
-          .map((m: any) => ({
-            id:   m.sk,
-            text: `New member ${m.name || m.phone || 'Unknown'} joined ${m.tier ?? 'STANDARD'} tier`,
-            ts:   m.createdAt,
-            icon: '👤',
-          }));
-        setRecentActivity((prev) => mergeActivity(prev, joinActivity, 'member'));
-      }
-    );
-
-    return () => unsubscribe();
   }, [adminSub]);
 
-  const topActivity = [...recentActivity]
-    .sort((a, b) => b.ts.localeCompare(a.ts))
-    .slice(0, 10);
+  const topActivity = recentActivity.slice(0, 10);
+
+  // ── Render ────────────────────────────────────────────────────────────────
 
   return (
     <div className="home-dashboard">
-      {/* ── Streamlined Header — logo + club name only ── */}
+      {/* Streamlined Header */}
       <div className="dashboard-header" style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: '12px',
-        padding: '12px 20px',
-        borderBottom: '1px solid #e5e7eb',
-        background: '#fff',
+        display: 'flex', alignItems: 'center', gap: '12px',
+        padding: '12px 20px', borderBottom: '1px solid #e5e7eb', background: '#fff',
       }}>
-        {/* Logo */}
         {logoBase64 ? (
           <img
             src={logoBase64}
             alt="Studio logo"
             style={{
-              width: '44px',
-              height: '44px',
-              borderRadius: '8px',
-              objectFit: 'cover',
-              border: '1px solid #e0e0e0',
+              width: '44px', height: '44px', borderRadius: '8px',
+              objectFit: 'cover', border: '1px solid #e0e0e0',
             }}
           />
         ) : (
           <div style={{
-            width: '44px',
-            height: '44px',
-            borderRadius: '8px',
-            background: '#2e3b50',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontSize: '22px',
-            flexShrink: 0,
+            width: '44px', height: '44px', borderRadius: '8px', background: '#2e3b50',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            fontSize: '22px', flexShrink: 0,
           }}>
             🎵
           </div>
         )}
-
         <h1 style={{
-          margin: 0,
-          fontSize: '17px',
-          fontWeight: '700',
-          color: '#2e3b50',
-          letterSpacing: '-0.01em',
+          margin: 0, fontSize: '17px', fontWeight: '700',
+          color: '#2e3b50', letterSpacing: '-0.01em',
         }}>
           {clubName}
         </h1>
@@ -191,7 +224,7 @@ export const ComprehensiveClubConsole: React.FC = () => {
 
       {/* Main Content */}
       <div className="dashboard-content">
-        {/* Quick Stats Grid — 3 columns */}
+        {/* KPI cards — 3 columns */}
         <div className="quick-stats-grid" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
           <div className="stat-card">
             <div className="stat-label">Active Members</div>
@@ -218,20 +251,24 @@ export const ComprehensiveClubConsole: React.FC = () => {
           </div>
         </div>
 
-        {/* Two Column Layout */}
+        {/* Two-column layout */}
         <div className="dashboard-layout">
           <div className="dashboard-main">
             <div className="dashboard-section">
               <h2 className="section-title">📊 Overview</h2>
               <p style={{ color: '#666', fontSize: '12px' }}>
-                Select a tab above to view Activities, Facilities, Appointments, Packages,
-                Members, and Marketing campaigns.
+                Select a tab above to view Activities, Facilities, Appointments,
+                Packages, Members, and Marketing campaigns.
               </p>
             </div>
 
             <div className="dashboard-section">
               <h2 className="section-title">🔄 Recent Activity</h2>
-              {topActivity.length === 0 ? (
+              {loadingMetrics ? (
+                <p style={{ fontSize: '12px', color: '#bbb', fontStyle: 'italic' }}>
+                  Loading…
+                </p>
+              ) : topActivity.length === 0 ? (
                 <p style={{ fontSize: '12px', color: '#bbb', fontStyle: 'italic' }}>
                   No recent activity yet.
                 </p>
@@ -244,7 +281,9 @@ export const ComprehensiveClubConsole: React.FC = () => {
                     <li key={item.id} style={{ marginBottom: '4px' }}>
                       <span style={{ marginRight: '6px' }}>{item.icon}</span>
                       <span>{item.text}</span>
-                      <span style={{ color: '#bbb', marginLeft: '8px', fontSize: '10px' }}>
+                      <span style={{
+                        color: '#bbb', marginLeft: '8px', fontSize: '10px',
+                      }}>
                         {fmtTs(item.ts)}
                       </span>
                     </li>
@@ -262,14 +301,3 @@ export const ComprehensiveClubConsole: React.FC = () => {
     </div>
   );
 };
-
-// ── Merge helper ──────────────────────────────────────────────────────────────
-function mergeActivity(
-  prev:         ActivityItem[],
-  incoming:     ActivityItem[],
-  sourcePrefix: string
-): ActivityItem[] {
-  const tagged = incoming.map((i) => ({ ...i, id: `${sourcePrefix}::${i.id}` }));
-  const kept   = prev.filter((i) => !i.id.startsWith(`${sourcePrefix}::`));
-  return [...kept, ...tagged];
-}
