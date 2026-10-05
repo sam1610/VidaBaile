@@ -3,6 +3,7 @@ import React from 'react';
 import { useAdminSub } from '../../hooks';
 import DatabaseService from '../../services/DatabaseService';
 import { ActivityCrudModal } from './ActivityCrudModal';
+import { SmartAssignmentModal } from './SmartAssignmentModal';
 import './ActivitiesTab.css';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -76,8 +77,9 @@ export const ActivitiesTab = () => {
   const [editingActivity,setEditingActivity]= useState<Schedule | null>(null);
   const [isSubmitting,   setIsSubmitting]   = useState(false);
 
-  // ── Smart Assignment selection stub ──────────────────────────────────────
+  // ── Smart Assignment ─────────────────────────────────────────
   const [selectedPendingGroup, setSelectedPendingGroup] = useState<PendingGroup | null>(null);
+  const [showAssignModal,      setShowAssignModal]      = useState(false);
 
   // ── Fetch coaches ─────────────────────────────────────────────────────────
   useEffect(() => {
@@ -259,8 +261,22 @@ export const ActivitiesTab = () => {
 
   const handleAssign = (group: PendingGroup) => {
     setSelectedPendingGroup(group);
-    console.log('[ActivitiesTab] Smart Assignment selected:', group);
-    // TODO: open Smart Assignment modal (Merge vs. Create New)
+    setShowAssignModal(true);
+    console.log('[ActivitiesTab] Smart Assignment opened for:', group.activityType);
+  };
+
+  const handleMerge = (scheduleId: string) => {
+    console.log('[ActivitiesTab] Merge', selectedPendingGroup?.bookings.length, 'members into schedule', scheduleId);
+    // TODO: link pending bookings to the selected schedule
+    setShowAssignModal(false);
+    setSelectedPendingGroup(null);
+  };
+
+  const handleCreateNew = (data: { date: string; startTime: string; endTime: string; coachPhone: string; facilityId: string }) => {
+    console.log('[ActivitiesTab] Create new class and assign', selectedPendingGroup?.bookings.length, 'members:', data);
+    // TODO: create schedule then link bookings
+    setShowAssignModal(false);
+    setSelectedPendingGroup(null);
   };
 
   if (adminLoading) {
@@ -358,13 +374,27 @@ export const ActivitiesTab = () => {
                     </span>
                   </div>
 
-                  {/* Member list */}
-                  <ul style={{ margin: '0 0 8px', padding: '0 0 0 14px', fontSize: '11px', color: '#64748b', lineHeight: 1.7 }}>
-                    {group.bookings.slice(0, 5).map((b) => (
-                      <li key={b.sk}>{b.memberPhone || b.phone || '—'}</li>
-                    ))}
+                  {/* Member list with avatar placeholders */}
+                  <ul style={{ margin: '0 0 8px', padding: 0, listStyle: 'none' }}>
+                    {group.bookings.slice(0, 5).map((b) => {
+                      const id      = b.memberPhone || b.phone || b.sk;
+                      const ACOLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
+                      const aColor  = ACOLORS[id.split('').reduce((a: number, ch: string) => a + ch.charCodeAt(0), 0) % ACOLORS.length];
+                      const aInit   = id.replace(/\+/g,'').trim().slice(-2,-1).toUpperCase() || '?';
+                      return (
+                        <li key={b.sk} style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '5px' }}>
+                          <div style={{
+                            width: 24, height: 24, borderRadius: '50%',
+                            background: aColor, color: '#fff',
+                            display: 'flex', alignItems: 'center', justifyContent: 'center',
+                            fontSize: '10px', fontWeight: '700', flexShrink: 0,
+                          }}>{aInit}</div>
+                          <span style={{ fontSize: '11px', color: '#475569' }}>{id}</span>
+                        </li>
+                      );
+                    })}
                     {group.bookings.length > 5 && (
-                      <li style={{ color: '#94a3b8', fontStyle: 'italic' }}>
+                      <li style={{ fontSize: '11px', color: '#94a3b8', fontStyle: 'italic', paddingLeft: '31px' }}>
                         +{group.bookings.length - 5} more
                       </li>
                     )}
@@ -488,6 +518,23 @@ export const ActivitiesTab = () => {
           )}
         </div>
       </div>
+
+      {/* Smart Assignment Modal */}
+      <SmartAssignmentModal
+        isOpen={showAssignModal}
+        onClose={() => { setShowAssignModal(false); setSelectedPendingGroup(null); }}
+        pendingGroup={selectedPendingGroup}
+        schedules={schedules.filter((s) =>
+          selectedPendingGroup
+            ? s.activityType.toLowerCase().includes(selectedPendingGroup.activityType.toLowerCase()) ||
+              selectedPendingGroup.activityType.toLowerCase().includes(s.activityType.toLowerCase())
+            : false
+        )}
+        coaches={coaches}
+        facilities={facilities}
+        onMerge={handleMerge}
+        onCreateNew={handleCreateNew}
+      />
 
       {/* Activity CRUD Modal */}
       <ActivityCrudModal
