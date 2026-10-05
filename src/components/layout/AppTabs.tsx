@@ -76,6 +76,22 @@ export function AppTabs(): React.ReactElement {
   }
 
   return (
+    <>
+      {/* Active tab highlight — overrides Amplify UI default (border-only) */}
+      <style>{`
+        [data-amplify-component='tabs-item'][data-state='active'] {
+          background-color: #e8f4f8 !important;
+          border-radius: 6px 6px 0 0 !important;
+          transition: background-color 0.2s ease !important;
+        }
+        [data-amplify-component='tabs-item'] {
+          transition: background-color 0.2s ease;
+          border-radius: 6px 6px 0 0;
+        }
+        [data-amplify-component='tabs-item']:not([data-state='active']):hover {
+          background-color: #f5f9fb;
+        }
+      `}</style>
     <div style={{
       display: 'flex',
       flexDirection: 'column',
@@ -134,6 +150,7 @@ export function AppTabs(): React.ReactElement {
         </main>
       </Tabs.Container>
     </div>
+    </>
   );
 }
 

@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState } from 'react';
 import React from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../hooks/useAppSync';
@@ -87,14 +87,6 @@ export const ComprehensiveClubConsole: React.FC = () => {
   // ── Date filter state ────────────────────────────────────────────────────
   const [filterStartDate, setFilterStartDate] = useState<string>('');
   const [filterEndDate,   setFilterEndDate]   = useState<string>('');
-
-  // Stable date strings — computed once per mount
-  // const today      = useMemo(() => todayStr(),            []);
-  // const sevenAhead = useMemo(() => sevenDaysLater(today), [today]);
-
-  // Ref for adminSub inside subscriptions
-  const adminSubRef = useRef(adminSub);
-  useEffect(() => { adminSubRef.current = adminSub; }, [adminSub]);
 
   // ── Load PROFILE ──────────────────────────────────────────────────────────
   useEffect(() => {
