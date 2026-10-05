@@ -1879,6 +1879,52 @@ export async function dispatchScheduleNotifications(
 
 
 // ============================================================================
+// PENDING BOOKINGS SUBSCRIPTION
+// ============================================================================
+
+/**
+ * Real-time subscription to BOOKING records with status PENDING_SCHEDULING.
+ * Uses observeQuery on the full tenant partition, filtered client-side.
+ * Each callback delivers the complete current list of pending bookings.
+ */
+export function observePendingBookings(
+  adminSub: string,
+  callback: (data: any[]) => void
+): (() => void) {
+  console.log(`[DB Service] Starting PENDING_SCHEDULING subscription for: ${adminSub}`);
+
+  const client = generateClient<Schema>();
+
+  const subscription = (client.models as any).ClubRecord.observeQuery({
+    filter: {
+      and: [
+        { pk: { eq: adminSub } },
+        { entityType: { eq: 'BOOKING' } },
+      ],
+    },
+  }).subscribe({
+    next: ({ items }: { items: any[] }) => {
+      // Filter in the callback — observeQuery client filter is best-effort
+      const pending = items.filter(
+        (r: any) =>
+          r?.entityType === 'BOOKING' &&
+          (r.status === 'PENDING_SCHEDULING' || !r.scheduleId)
+      );
+      console.log(`[DB Service] Pending bookings: ${pending.length}`);
+      callback(pending);
+    },
+    error: (err: Error) => {
+      console.error('[DB Service] PENDING_SCHEDULING subscription error:', err);
+    },
+  });
+
+  return () => {
+    console.log('[DB Service] Unsubscribing from PENDING_SCHEDULING updates');
+    subscription.unsubscribe();
+  };
+}
+
+// ============================================================================
 // UNIFIED EXPORT: All functions exported here (ONE export default only)
 // ============================================================================
 
@@ -2240,6 +2286,7 @@ export default {
   observeCoaches,
   observeMembers,
   observeSchedulesByDateRange,
+  observePendingBookings,
 
   // Facility Operations
   createFacilityRecord,
