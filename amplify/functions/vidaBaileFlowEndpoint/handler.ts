@@ -269,11 +269,11 @@ export const handler = async (event: any) => {
             TableName: TABLE_NAME,
             Key: { pk: { S: adminSub }, sk: { S: bookingSk } },
             UpdateExpression:
-              "SET entityType = :type, phone = :phone, packageId = :pkgId, #dateAttr = :date, startTime = :time, #statusAttr = :status, bookedAt = :ts, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk, #typename = :typename",
+              "SET entityType = :type, phone = :phone, packageId = :pkgId, #dateAttr = :date, startTime = :time, #statusAttr = :status, bookedAt = :ts, createdAt = :ts, updatedAt = :ts, activityType = :activity, gsi1pk = :gsi1pk, gsi1sk = :gsi1sk, #typename = :typename",
             ExpressionAttributeNames: {
-              "#dateAttr": "date",     
-              "#statusAttr": "status",  
-              "#typename": "__typename"
+              "#dateAttr":  "date",
+              "#statusAttr": "status",
+              "#typename":  "__typename"
             },
             ExpressionAttributeValues: {
               ":type":     { S: "BOOKING" },
@@ -281,10 +281,11 @@ export const handler = async (event: any) => {
               ":pkgId":    { S: payload.package_id || "UNKNOWN" },
               ":date":     { S: payload.date   || "" },
               ":time":     { S: payload.time   || "" },
-              ":status":   { S: "PENDING_SCHEDULING" }, // Required by Timetable Agent
+              ":status":   { S: "PENDING_SCHEDULING" },
               ":ts":       { S: timestamp },
-              ":gsi1pk":   { S: `${adminSub}#BOOKINGS` }, 
-              ":gsi1sk":   { S: `STATUS#PENDING_SCHEDULING` }, // Required by Timetable Agent
+              ":activity": { S: "Package Enrollment" },
+              ":gsi1pk":   { S: `${adminSub}#BOOKINGS` },
+              ":gsi1sk":   { S: `STATUS#PENDING_SCHEDULING` },
               ":typename": { S: "ClubRecord" }
             },
           }));
