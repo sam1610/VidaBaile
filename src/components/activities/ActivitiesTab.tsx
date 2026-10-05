@@ -35,6 +35,7 @@ interface PendingBooking {
   date?: string;
   startTime?: string;
   status?: string;
+  bookedAt?: string;
 }
 
 interface PendingGroup {
@@ -149,16 +150,25 @@ export const ActivitiesTab = () => {
       adminSub,
       (data: any[]) => {
         setPendingBookings(
-          data.map((r) => ({
-            sk:          r.sk          ?? '',
-            phone:       r.phone       ?? r.memberPhone,
-            memberPhone: r.memberPhone ?? r.phone,
-            packageId:   r.packageId,
-            activityType: r.activityType || r.packageId || 'Unknown Activity',
-            date:        r.date,
-            startTime:   r.startTime,
-            status:      r.status,
-          }))
+          data.map((r) => {
+            // Resolve a human-readable group label.
+            // WhatsApp flow bookings carry packageId but not activityType.
+            const resolvedActivity =
+              (r.activityType && r.activityType.trim()) ||
+              (r.packageId    && `Package: ${r.packageId}`) ||
+              'Pending Enrollment';
+            return {
+              sk:          r.sk          ?? '',
+              phone:       r.phone       ?? r.memberPhone ?? '',
+              memberPhone: r.memberPhone ?? r.phone       ?? '',
+              packageId:   r.packageId,
+              activityType: resolvedActivity,
+              date:        r.date,
+              startTime:   r.startTime,
+              status:      r.status,
+              bookedAt:    r.bookedAt,
+            };
+          })
         );
       }
     );

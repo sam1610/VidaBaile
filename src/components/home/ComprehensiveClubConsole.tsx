@@ -36,7 +36,12 @@ function fmtTs(iso: string): string {
 
 function itemToActivity(item: any): ActivityItem | null {
   const et = item?.entityType;
-  const ts = item?.createdAt ?? item?.bookedAt ?? item?.updatedAt;
+
+  // Resolve timestamp — BOOKING records from WhatsApp use bookedAt, not createdAt
+  const ts =
+    (et === 'BOOKING'
+      ? item?.bookedAt ?? item?.createdAt ?? item?.updatedAt
+      : item?.createdAt ?? item?.bookedAt ?? item?.updatedAt);
   if (!ts) return null;
 
   if (et === 'SCHEDULE') {
@@ -48,9 +53,15 @@ function itemToActivity(item: any): ActivityItem | null {
     };
   }
   if (et === 'BOOKING') {
+    // WhatsApp flow bookings have packageId but no activityType or scheduleId yet
+    const activity =
+      (item.activityType && item.activityType.trim()) ||
+      (item.packageId    && `Package: ${item.packageId}`) ||
+      'a Package';
+    const member = item.memberPhone || item.phone || 'A member';
     return {
       id:   `booking::${item.sk}`,
-      text: `${item.memberPhone || item.phone || 'A member'} enrolled in ${item.activityType || item.scheduleId || 'a class'}`,
+      text: `${member} enrolled in ${activity}`,
       ts,
       icon: '🎟️',
     };
