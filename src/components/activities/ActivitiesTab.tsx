@@ -1,5 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
-import React from 'react';
+import { useEffect, useMemo, useState, Fragment } from 'react';
 import { useAdminSub } from '../../hooks';
 import DatabaseService from '../../services/DatabaseService';
 import { ActivityCrudModal } from './ActivityCrudModal';
@@ -31,6 +30,7 @@ interface PendingBooking {
   sk: string;
   phone?: string;
   memberPhone?: string;
+  name?: string;        // WhatsApp profile name — written by vidaBaileWhatsapp handler
   packageId?: string;
   activityType?: string;
   date?: string;
@@ -44,12 +44,32 @@ interface PendingGroup {
   bookings: PendingBooking[];
 }
 
+// ── Avatar helpers ─────────────────────────────────────────────────────────────
+
+const AVATAR_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
+
+function avatarInit(booking: PendingBooking): string {
+  const n = booking.name?.trim();
+  if (n) return n.charAt(0).toUpperCase();
+  return '\u{1F464}';
+}
+
+function avatarLabel(booking: PendingBooking): string {
+  return booking.name?.trim() || booking.memberPhone || booking.phone || booking.sk;
+}
+
+function avatarColor(booking: PendingBooking): string {
+  const seed = booking.name?.trim() || booking.memberPhone || booking.phone || booking.sk;
+  const idx  = seed.split('').reduce((a, ch) => a + ch.charCodeAt(0), 0) % AVATAR_COLORS.length;
+  return AVATAR_COLORS[idx];
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export const ActivitiesTab = () => {
   const { adminSub, loading: adminLoading } = useAdminSub();
 
-  // ── Date range ───────────────────────────────────────────────────────────
+  // Date range
   const [startDate, setStartDate] = useState<string>(
     getMonday(new Date()).toISOString().split('T')[0]
   );
@@ -59,29 +79,21 @@ export const ActivitiesTab = () => {
     return end.toISOString().split('T')[0];
   });
 
-  // ── Schedules ────────────────────────────────────────────────────────────
-  const [schedules,        setSchedules]        = useState<Schedule[]>([]);
-  const [schedulesLoading, setSchedulesLoading] = useState(false);
+  const [schedules,           setSchedules]           = useState<Schedule[]>([]);
+  const [schedulesLoading,    setSchedulesLoading]    = useState(false);
+  const [coaches,             setCoaches]             = useState<Coach[]>([]);
+  const [coachesLoading,      setCoachesLoading]      = useState(false);
+  const [facilities,          setFacilities]          = useState<Facility[]>([]);
+  const [facilitiesLoading,   setFacilitiesLoading]   = useState(false);
+  const [pendingBookings,     setPendingBookings]     = useState<PendingBooking[]>([]);
+  const [showModal,           setShowModal]           = useState(false);
+  const [editingActivity,     setEditingActivity]     = useState<Schedule | null>(null);
+  const [isSubmitting,        setIsSubmitting]        = useState(false);
+  const [selectedPendingGroup,setSelectedPendingGroup]= useState<PendingGroup | null>(null);
+  const [showAssignModal,     setShowAssignModal]     = useState(false);
+  const [isAssigning,         setIsAssigning]         = useState(false);
 
-  // ── Coaches & Facilities (for display mapping) ───────────────────────────
-  const [coaches,          setCoaches]          = useState<Coach[]>([]);
-  const [coachesLoading,   setCoachesLoading]   = useState(false);
-  const [facilities,       setFacilities]       = useState<Facility[]>([]);
-  const [facilitiesLoading,setFacilitiesLoading]= useState(false);
-
-  // ── Pending bookings ─────────────────────────────────────────────────────
-  const [pendingBookings,  setPendingBookings]  = useState<PendingBooking[]>([]);
-
-  // ── Modal state ──────────────────────────────────────────────────────────
-  const [showModal,      setShowModal]      = useState(false);
-  const [editingActivity,setEditingActivity]= useState<Schedule | null>(null);
-  const [isSubmitting,   setIsSubmitting]   = useState(false);
-
-  // ── Smart Assignment ─────────────────────────────────────────
-  const [selectedPendingGroup, setSelectedPendingGroup] = useState<PendingGroup | null>(null);
-  const [showAssignModal,      setShowAssignModal]      = useState(false);
-
-  // ── Fetch coaches ─────────────────────────────────────────────────────────
+  // Fetch coaches
   useEffect(() => {
     if (!adminSub) return;
     setCoachesLoading(true);
@@ -93,7 +105,7 @@ export const ActivitiesTab = () => {
       .finally(() => setCoachesLoading(false));
   }, [adminSub]);
 
-  // ── Fetch facilities ──────────────────────────────────────────────────────
+  // Fetch facilities
   useEffect(() => {
     if (!adminSub) return;
     setFacilitiesLoading(true);
@@ -103,10 +115,10 @@ export const ActivitiesTab = () => {
           Array.isArray(data)
             ? data.map((f) => ({
                 facilityId: f.facilityId || f.id || f.sk?.replace('FACILITY#', ''),
-                id: f.id || f.facilityId || f.sk?.replace('FACILITY#', ''),
-                sk: f.sk,
-                name: f.name || f.location || 'Unknown Facility',
-                capacity: f.capacity || 0,
+                id:         f.id || f.facilityId || f.sk?.replace('FACILITY#', ''),
+                sk:         f.sk,
+                name:       f.name || f.location || 'Unknown Facility',
+                capacity:   f.capacity || 0,
               }))
             : []
         )
@@ -115,7 +127,7 @@ export const ActivitiesTab = () => {
       .finally(() => setFacilitiesLoading(false));
   }, [adminSub]);
 
-  // ── Subscribe to schedules ────────────────────────────────────────────────
+  // Subscribe to schedules
   useEffect(() => {
     if (!adminSub || !startDate || !endDate) return;
     setSchedulesLoading(true);
@@ -145,7 +157,7 @@ export const ActivitiesTab = () => {
     return () => unsubscribe();
   }, [adminSub, startDate, endDate]);
 
-  // ── Subscribe to pending bookings ─────────────────────────────────────────
+  // Subscribe to pending bookings
   useEffect(() => {
     if (!adminSub) return;
     const unsubscribe = DatabaseService.observePendingBookings(
@@ -153,22 +165,22 @@ export const ActivitiesTab = () => {
       (data: any[]) => {
         setPendingBookings(
           data.map((r) => {
-            // Resolve a human-readable group label.
-            // WhatsApp flow bookings carry packageId but not activityType.
             const resolvedActivity =
               (r.activityType && r.activityType.trim()) ||
               (r.packageId    && `Package: ${r.packageId}`) ||
               'Pending Enrollment';
             return {
-              sk:          r.sk          ?? '',
-              phone:       r.phone       ?? r.memberPhone ?? '',
-              memberPhone: r.memberPhone ?? r.phone       ?? '',
-              packageId:   r.packageId,
+              sk:           r.sk          ?? '',
+              phone:        r.phone       ?? r.memberPhone ?? '',
+              memberPhone:  r.memberPhone ?? r.phone       ?? '',
+              // name is written by vidaBaileWhatsapp from the WhatsApp sender profile
+              name:         r.name        ?? r.memberName  ?? r.displayName ?? '',
+              packageId:    r.packageId,
               activityType: resolvedActivity,
-              date:        r.date,
-              startTime:   r.startTime,
-              status:      r.status,
-              bookedAt:    r.bookedAt,
+              date:         r.date,
+              startTime:    r.startTime,
+              status:       r.status,
+              bookedAt:     r.bookedAt,
             };
           })
         );
@@ -177,7 +189,6 @@ export const ActivitiesTab = () => {
     return () => unsubscribe();
   }, [adminSub]);
 
-  // ── Lookup maps ───────────────────────────────────────────────────────────
   const coachMap = useMemo(() => {
     const map: Record<string, string> = {};
     coaches.forEach((c) => { map[c.phone] = c.name; });
@@ -193,7 +204,6 @@ export const ActivitiesTab = () => {
     return map;
   }, [facilities]);
 
-  // ── Group pending bookings by activityType ────────────────────────────────
   const pendingGroups = useMemo((): PendingGroup[] => {
     const map = new Map<string, PendingBooking[]>();
     for (const b of pendingBookings) {
@@ -204,13 +214,12 @@ export const ActivitiesTab = () => {
     return [...map.entries()].map(([activityType, bookings]) => ({ activityType, bookings }));
   }, [pendingBookings]);
 
-  // ── Group schedules by date ───────────────────────────────────────────────
   const schedulesByDate = useMemo(() => {
     const grouped: Record<string, SchedulesByDate> = {};
     const current = new Date(startDate);
     const end     = new Date(endDate);
     while (current <= end) {
-      const dateStr  = current.toISOString().split('T')[0];
+      const dateStr   = current.toISOString().split('T')[0];
       const dayOfWeek = ['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'][current.getDay()];
       grouped[dateStr] = { date: dateStr, dayOfWeek, schedules: [] };
       current.setDate(current.getDate() + 1);
@@ -221,9 +230,9 @@ export const ActivitiesTab = () => {
   }, [schedules, startDate, endDate]);
 
   // ── Handlers ─────────────────────────────────────────────────────────────
-  const handleOpenNewActivity = () => { setEditingActivity(null); setShowModal(true); };
 
-  const handleEditActivity = (schedule: Schedule) => { setEditingActivity(schedule); setShowModal(true); };
+  const handleOpenNewActivity = () => { setEditingActivity(null); setShowModal(true); };
+  const handleEditActivity    = (schedule: Schedule) => { setEditingActivity(schedule); setShowModal(true); };
 
   const handleDeleteActivity = async (schedule: Schedule) => {
     if (!window.confirm(`Delete "${schedule.activityType || 'Unnamed Activity'}"?`)) return;
@@ -262,28 +271,104 @@ export const ActivitiesTab = () => {
   const handleAssign = (group: PendingGroup) => {
     setSelectedPendingGroup(group);
     setShowAssignModal(true);
-    console.log('[ActivitiesTab] Smart Assignment opened for:', group.activityType);
   };
 
-  const handleMerge = (scheduleId: string) => {
-    console.log('[ActivitiesTab] Merge', selectedPendingGroup?.bookings.length, 'members into schedule', scheduleId);
-    // TODO: link pending bookings to the selected schedule
-    setShowAssignModal(false);
-    setSelectedPendingGroup(null);
+  // Option A: Merge pending bookings into an existing schedule
+  const handleMerge = async (scheduleId: string) => {
+    if (!adminSub || !selectedPendingGroup) return;
+
+    const targetSchedule = schedules.find((s) => s.scheduleId === scheduleId);
+    if (!targetSchedule) {
+      alert('Target schedule not found. It may have been deleted.');
+      return;
+    }
+
+    const bookingSks = selectedPendingGroup.bookings.map((b) => b.sk).filter(Boolean);
+    if (bookingSks.length === 0) return;
+
+    setIsAssigning(true);
+    try {
+      const assigned = await DatabaseService.batchAssignBookingsToSchedule(
+        adminSub,
+        bookingSks,
+        targetSchedule,
+      );
+      if (assigned < bookingSks.length) {
+        alert(`Assigned ${assigned} of ${bookingSks.length} members. Check console for errors on remaining.`);
+      }
+      setShowAssignModal(false);
+      setSelectedPendingGroup(null);
+    } catch (err) {
+      alert(`Merge failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
-  const handleCreateNew = (data: { date: string; startTime: string; endTime: string; coachPhone: string; facilityId: string }) => {
-    console.log('[ActivitiesTab] Create new class and assign', selectedPendingGroup?.bookings.length, 'members:', data);
-    // TODO: create schedule then link bookings
-    setShowAssignModal(false);
-    setSelectedPendingGroup(null);
+  // Option B: Create a new schedule then assign all pending bookings to it
+  const handleCreateNew = async (data: {
+    date: string;
+    startTime: string;
+    endTime: string;
+    coachPhone: string;
+    facilityId: string;
+  }) => {
+    if (!adminSub || !selectedPendingGroup) return;
+
+    const newScheduleId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const bookingSks    = selectedPendingGroup.bookings.map((b) => b.sk).filter(Boolean);
+
+    setIsAssigning(true);
+    try {
+      const newSchedule = await DatabaseService.createScheduleRecord(adminSub, newScheduleId, {
+        date:             data.date,
+        startTime:        data.startTime,
+        endTime:          data.endTime,
+        facilityId:       data.facilityId,
+        activityType:     selectedPendingGroup.activityType,
+        coachPhone:       data.coachPhone,
+        capacity:         30,
+        currentOccupancy: 0,
+      });
+
+      const targetSchedule = {
+        scheduleId:       newScheduleId,
+        date:             data.date,
+        startTime:        data.startTime,
+        endTime:          data.endTime,
+        facilityId:       data.facilityId,
+        activityType:     selectedPendingGroup.activityType,
+        coachPhone:       data.coachPhone,
+        capacity:         (newSchedule as any).capacity ?? 30,
+        currentOccupancy: 0,
+      };
+
+      const assigned = await DatabaseService.batchAssignBookingsToSchedule(
+        adminSub,
+        bookingSks,
+        targetSchedule,
+      );
+
+      if (assigned < bookingSks.length) {
+        alert(`Class created. Assigned ${assigned} of ${bookingSks.length} members. Check console for errors.`);
+      }
+
+      setShowAssignModal(false);
+      setSelectedPendingGroup(null);
+    } catch (err) {
+      alert(`Create & Assign failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setIsAssigning(false);
+    }
   };
 
   if (adminLoading) {
     return (
       <div style={{ padding: '16px' }}>
-        <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: '700' }}>📅 ACTIVITIES & SCHEDULES</h2>
-        <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>Loading…</div>
+        <h2 style={{ margin: '0 0 16px 0', fontSize: '14px', fontWeight: '700' }}>
+          Activities & Schedules
+        </h2>
+        <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>Loading\u2026</div>
       </div>
     );
   }
@@ -297,7 +382,7 @@ export const ActivitiesTab = () => {
       <div style={{ flexShrink: 0, padding: '12px 16px', borderBottom: '1px solid #e5e7eb' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <h2 style={{ margin: 0, fontSize: '13px', fontWeight: '700', color: '#2e3b50' }}>
-            📅 ACTIVITIES & SCHEDULES
+            Activities & Schedules
           </h2>
 
           <label style={{ fontSize: '12px', fontWeight: '600', color: '#2e3b50', marginLeft: 'auto' }}>From:</label>
@@ -320,7 +405,7 @@ export const ActivitiesTab = () => {
       {/* Two-column body */}
       <div style={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
 
-        {/* ── LEFT: Pending Enrollments ────────────────────────────────── */}
+        {/* LEFT: Pending Enrollments */}
         <div style={{
           width: '300px', flexShrink: 0,
           background: '#ffffff',
@@ -333,7 +418,7 @@ export const ActivitiesTab = () => {
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
           }}>
             <span style={{ fontSize: '12px', fontWeight: '700', color: '#2e3b50' }}>
-              📋 Pending Enrollments
+              Pending Enrollments
             </span>
             {pendingBookings.length > 0 && (
               <span style={{
@@ -374,22 +459,25 @@ export const ActivitiesTab = () => {
                     </span>
                   </div>
 
-                  {/* Member list with avatar placeholders */}
+                  {/* Member list — shows name if available, phone as fallback */}
                   <ul style={{ margin: '0 0 8px', padding: 0, listStyle: 'none' }}>
                     {group.bookings.slice(0, 5).map((b) => {
-                      const id      = b.memberPhone || b.phone || b.sk;
-                      const ACOLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4'];
-                      const aColor  = ACOLORS[id.split('').reduce((a: number, ch: string) => a + ch.charCodeAt(0), 0) % ACOLORS.length];
-                      const aInit   = id.replace(/\+/g,'').trim().slice(-2,-1).toUpperCase() || '?';
+                      const hasName = !!b.name?.trim();
+                      const color   = avatarColor(b);
+                      const init    = avatarInit(b);
+                      const label   = avatarLabel(b);
                       return (
                         <li key={b.sk} style={{ display: 'flex', alignItems: 'center', gap: '7px', marginBottom: '5px' }}>
                           <div style={{
                             width: 24, height: 24, borderRadius: '50%',
-                            background: aColor, color: '#fff',
+                            background: hasName ? color : '#e2e8f0',
+                            color: hasName ? '#fff' : '#64748b',
                             display: 'flex', alignItems: 'center', justifyContent: 'center',
-                            fontSize: '10px', fontWeight: '700', flexShrink: 0,
-                          }}>{aInit}</div>
-                          <span style={{ fontSize: '11px', color: '#475569' }}>{id}</span>
+                            fontSize: hasName ? '10px' : '13px', fontWeight: '700', flexShrink: 0,
+                          }}>
+                            {init}
+                          </div>
+                          <span style={{ fontSize: '11px', color: '#475569' }}>{label}</span>
                         </li>
                       );
                     })}
@@ -400,7 +488,6 @@ export const ActivitiesTab = () => {
                     )}
                   </ul>
 
-                  {/* Assign button */}
                   <button
                     onClick={() => handleAssign(group)}
                     style={{
@@ -416,7 +503,7 @@ export const ActivitiesTab = () => {
                       transition: 'background 0.15s',
                     }}
                   >
-                    Assign →
+                    Assign
                   </button>
                 </div>
               ))
@@ -424,10 +511,10 @@ export const ActivitiesTab = () => {
           </div>
         </div>
 
-        {/* ── RIGHT: Schedule Table ────────────────────────────────────── */}
+        {/* RIGHT: Schedule Table */}
         <div style={{ flex: 1, background: '#f9fafb', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
           {schedulesLoading || coachesLoading || facilitiesLoading ? (
-            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>Loading schedules…</div>
+            <div style={{ textAlign: 'center', padding: '40px', color: '#999' }}>Loading schedules\u2026</div>
           ) : schedulesByDate.every((day) => day.schedules.length === 0) ? (
             <div style={{
               margin: '24px', background: '#fff', border: '1px solid #e0e0e0',
@@ -458,10 +545,10 @@ export const ActivitiesTab = () => {
                 <tbody>
                   {schedulesByDate.map((day) =>
                     day.schedules.length > 0 ? (
-                      <React.Fragment key={day.date}>
+                      <Fragment key={day.date}>
                         <tr className="date-header-row">
                           <td colSpan={7} className="date-header">
-                            <strong>{day.dayOfWeek}</strong> — {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
+                            <strong>{day.dayOfWeek}</strong> {String.fromCharCode(8212)} {new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' })}
                           </td>
                         </tr>
                         {day.schedules.map((schedule) => {
@@ -497,19 +584,19 @@ export const ActivitiesTab = () => {
                                   style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '3px 6px', opacity: 0.7 }}
                                   onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
                                   onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}>
-                                  ✏️
+                                  Edit
                                 </button>
                                 <button onClick={() => handleDeleteActivity(schedule)} title="Delete"
                                   style={{ background: 'transparent', border: 'none', cursor: 'pointer', fontSize: '15px', padding: '3px 6px', opacity: 0.7, marginLeft: '2px' }}
                                   onMouseEnter={(e) => (e.currentTarget.style.opacity = '1')}
                                   onMouseLeave={(e) => (e.currentTarget.style.opacity = '0.7')}>
-                                  🗑️
+                                  Delete
                                 </button>
                               </td>
                             </tr>
                           );
                         })}
-                      </React.Fragment>
+                      </Fragment>
                     ) : null
                   )}
                 </tbody>
@@ -519,21 +606,17 @@ export const ActivitiesTab = () => {
         </div>
       </div>
 
-      {/* Smart Assignment Modal */}
+      {/* Smart Assignment Modal — ALL schedules passed; no activityType pre-filter */}
       <SmartAssignmentModal
         isOpen={showAssignModal}
         onClose={() => { setShowAssignModal(false); setSelectedPendingGroup(null); }}
         pendingGroup={selectedPendingGroup}
-        schedules={schedules.filter((s) =>
-          selectedPendingGroup
-            ? s.activityType.toLowerCase().includes(selectedPendingGroup.activityType.toLowerCase()) ||
-              selectedPendingGroup.activityType.toLowerCase().includes(s.activityType.toLowerCase())
-            : false
-        )}
+        schedules={schedules}
         coaches={coaches}
         facilities={facilities}
         onMerge={handleMerge}
         onCreateNew={handleCreateNew}
+        isLoading={isAssigning}
       />
 
       {/* Activity CRUD Modal */}

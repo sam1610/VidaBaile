@@ -2257,6 +2257,163 @@ export async function updateCampaignStatus(
 }
 
 
+
+// ============================================================================
+// SMART ASSIGNMENT: Assign pending bookings to a confirmed schedule
+// ============================================================================
+
+/**
+ * Assign a single pending BOOKING record to a confirmed schedule.
+ *
+ * DynamoDB sk is immutable, so this is a delete-then-put:
+ *   1. Read the current pending booking to preserve all fields.
+ *   2. Delete the old record (PENDING sk).
+ *   3. Create a new record with the confirmed scheduleId wired into both
+ *      sk and the scalar scheduleId field, and status = CONFIRMED.
+ *
+ * The caller is responsible for incrementing currentOccupancy on the
+ * target schedule after all bookings have been assigned.
+ *
+ * @param adminSub    Admin's Cognito SUB
+ * @param bookingSk   Full sk of the pending booking (e.g. BOOKING#<id>#MEMBER#<phone>)
+ * @param scheduleId  Confirmed schedule ID to assign to
+ */
+export async function assignBookingToSchedule(
+  adminSub: string,
+  bookingSk: string,
+  scheduleId: string,
+): Promise<void> {
+  const client = generateClient<Schema>();
+
+  // 1. Read current record
+  const { data: current, errors: readErrors } = await (client.models as any).ClubRecord.get({
+    pk: adminSub,
+    sk: bookingSk,
+  });
+  if (readErrors?.length) {
+    throw new Error(readErrors[0]?.message || `Failed to read booking: ${bookingSk}`);
+  }
+  if (!current) {
+    throw new Error(`Booking not found: ${bookingSk}`);
+  }
+
+  // 2. Derive new sk: strip any existing SCHEDULE# tail, append confirmed one
+  const skBase = bookingSk.replace(/#SCHEDULE#[^#]*$/, '');
+  const newSk  = `${skBase}#SCHEDULE#${scheduleId}`;
+
+  const now = new Date().toISOString();
+
+  // 3. Resolve member phone from the record or from the sk itself
+  const skMemberMatch = bookingSk.match(/#MEMBER#([^#]+)/);
+  const memberPhone: string =
+    (current as any).memberPhone ??
+    (current as any).phone ??
+    (skMemberMatch ? skMemberMatch[1] : '');
+
+  const confirmedRecord = {
+    pk:           adminSub,
+    sk:           newSk,
+    entityType:   'BOOKING',
+    // GSI1: member booking history
+    gsi1pk:       `${adminSub}#MEMBER#${memberPhone}`,
+    gsi1sk:       `BOOKING#DATETIME#${now}`,
+    // GSI2: schedule enrollment list
+    gsi2pk:       `${adminSub}#SCHEDULE#${scheduleId}`,
+    gsi2sk:       `DATETIME#${now}`,
+    // Preserve member-facing fields
+    phone:        memberPhone,
+    memberPhone:  memberPhone,
+    name:         (current as any).name         ?? '',
+    packageId:    (current as any).packageId    ?? '',
+    activityType: (current as any).activityType ?? '',
+    coachPhone:   (current as any).coachPhone   ?? '',
+    date:         (current as any).date         ?? '',
+    startTime:    (current as any).startTime    ?? '',
+    endTime:      (current as any).endTime      ?? '',
+    bookedAt:     (current as any).bookedAt     ?? now,
+    // Updated fields
+    scheduleId,
+    status:       'CONFIRMED',
+    updatedAt:    now,
+  };
+
+  // 4. Delete old sk then create new sk
+  const { errors: deleteErrors } = await (client.models as any).ClubRecord.delete({
+    pk: adminSub,
+    sk: bookingSk,
+  });
+  if (deleteErrors?.length) {
+    throw new Error(deleteErrors[0]?.message || `Failed to delete old booking sk: ${bookingSk}`);
+  }
+
+  const { errors: createErrors } = await (client.models as any).ClubRecord.create(confirmedRecord);
+  if (createErrors?.length) {
+    throw new Error(createErrors[0]?.message || `Failed to create confirmed booking: ${newSk}`);
+  }
+
+  console.log(`[DB Service] Booking assigned: ${bookingSk} -> ${newSk} (schedule ${scheduleId})`);
+}
+
+/**
+ * Batch-assign all bookings in a pending group to a schedule, then
+ * increment the schedule's currentOccupancy by the number of bookings assigned.
+ *
+ * @param adminSub         Admin's Cognito SUB
+ * @param bookingSks       Array of pending booking sk values
+ * @param targetSchedule   The schedule record the bookings are merged into
+ * @returns                Count of successfully assigned bookings
+ */
+export async function batchAssignBookingsToSchedule(
+  adminSub: string,
+  bookingSks: string[],
+  targetSchedule: {
+    scheduleId: string;
+    date: string;
+    startTime: string;
+    endTime: string;
+    facilityId: string;
+    activityType: string;
+    coachPhone: string;
+    capacity: number;
+    currentOccupancy?: number;
+  },
+): Promise<number> {
+  let assigned = 0;
+
+  for (const sk of bookingSks) {
+    try {
+      await assignBookingToSchedule(adminSub, sk, targetSchedule.scheduleId);
+      assigned++;
+    } catch (err) {
+      // Continue with remaining bookings — partial success beats full failure
+      console.error(`[DB Service] batchAssign: failed for sk=${sk}`, err);
+    }
+  }
+
+  if (assigned > 0) {
+    try {
+      await updateScheduleRecord(adminSub, targetSchedule.scheduleId, {
+        date:             targetSchedule.date,
+        startTime:        targetSchedule.startTime,
+        endTime:          targetSchedule.endTime,
+        facilityId:       targetSchedule.facilityId,
+        activityType:     targetSchedule.activityType,
+        coachPhone:       targetSchedule.coachPhone,
+        capacity:         targetSchedule.capacity,
+        currentOccupancy: (targetSchedule.currentOccupancy ?? 0) + assigned,
+      });
+    } catch (err) {
+      console.error('[DB Service] batchAssign: failed to update occupancy', err);
+    }
+  }
+
+  console.log(
+    `[DB Service] batchAssignBookingsToSchedule: ${assigned}/${bookingSks.length} assigned to ${targetSchedule.scheduleId}`
+  );
+  return assigned;
+}
+
+
 export default {
   // CRUD Operations
   createMemberRecord,
@@ -2270,6 +2427,8 @@ export default {
   createBookingRecord,
   deleteBookingRecord,
   queryBookingsBySchedule,
+  assignBookingToSchedule,
+  batchAssignBookingsToSchedule,
   dispatchScheduleNotifications,
   createPackageRecord,
   createClaimRecord,

@@ -6,6 +6,7 @@ interface PendingBooking {
   sk: string;
   phone?: string;
   memberPhone?: string;
+  name?: string;          // WhatsApp profile name — preferred display value
   packageId?: string;
   activityType?: string;
 }
@@ -34,27 +35,36 @@ export interface SmartAssignmentModalProps {
   isOpen:        boolean;
   onClose:       () => void;
   pendingGroup:  PendingGroup | null;
-  schedules:     Schedule[];   // existing schedules matching the activityType
+  /** All upcoming schedules in the selected date range — no activityType pre-filter */
+  schedules:     Schedule[];
   coaches:       Coach[];
   facilities:    Facility[];
   onMerge:       (scheduleId: string) => void;
   onCreateNew:   (data: { date: string; startTime: string; endTime: string; coachPhone: string; facilityId: string }) => void;
+  /** Shows a loading state on action buttons while the DB write is in flight */
+  isLoading?:    boolean;
 }
 
 // ── Avatar helper ─────────────────────────────────────────────────────────────
 
 const AVATAR_COLORS = ['#3b82f6','#10b981','#f59e0b','#ef4444','#8b5cf6','#06b6d4','#ec4899'];
 
-function Avatar({ identifier }: { identifier: string }) {
-  const idx   = identifier.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % AVATAR_COLORS.length;
-  const color = AVATAR_COLORS[idx];
-  const init  = identifier.replace(/\+/g, '').trim().slice(-2, -1).toUpperCase() || '?';
+function Avatar({ booking }: { booking: PendingBooking }) {
+  const hasName = !!booking.name?.trim();
+  const seed    = booking.name?.trim() || booking.memberPhone || booking.phone || booking.sk;
+  const idx     = seed.split('').reduce((acc, ch) => acc + ch.charCodeAt(0), 0) % AVATAR_COLORS.length;
+  const color   = AVATAR_COLORS[idx];
+  // First letter of name when available; generic icon when not.
+  const init    = hasName ? booking.name!.trim().charAt(0).toUpperCase() : '\u{1F464}';
+
   return (
     <div style={{
       width: 28, height: 28, borderRadius: '50%',
-      background: color, color: '#fff',
+      background: hasName ? color : '#e2e8f0',
+      color: hasName ? '#fff' : '#64748b',
       display: 'flex', alignItems: 'center', justifyContent: 'center',
-      fontSize: '11px', fontWeight: '700',
+      fontSize: hasName ? '11px' : '14px',
+      fontWeight: '700',
       flexShrink: 0,
     }}>
       {init}
@@ -62,10 +72,15 @@ function Avatar({ identifier }: { identifier: string }) {
   );
 }
 
+function bookingLabel(b: PendingBooking): string {
+  return b.name?.trim() || b.memberPhone || b.phone || b.sk;
+}
+
 // ── Component ─────────────────────────────────────────────────────────────────
 
 export function SmartAssignmentModal({
-  isOpen, onClose, pendingGroup, schedules, coaches, facilities, onMerge, onCreateNew,
+  isOpen, onClose, pendingGroup, schedules, coaches, facilities,
+  onMerge, onCreateNew, isLoading = false,
 }: SmartAssignmentModalProps) {
 
   const [selectedScheduleId, setSelectedScheduleId] = useState<string>('');
@@ -77,15 +92,16 @@ export function SmartAssignmentModal({
 
   if (!isOpen || !pendingGroup) return null;
 
-  const count      = pendingGroup.bookings.length;
-  const activity   = pendingGroup.activityType;
+  const count    = pendingGroup.bookings.length;
+  const activity = pendingGroup.activityType;
 
   const handleMerge = () => {
-    if (!selectedScheduleId) return;
+    if (!selectedScheduleId || isLoading) return;
     onMerge(selectedScheduleId);
   };
 
   const handleCreate = () => {
+    if (isLoading) return;
     if (!newDate || !newStartTime || !newEndTime || !newCoach || !newFacility) {
       alert('Please fill in all fields before creating a new class.');
       return;
@@ -115,10 +131,13 @@ export function SmartAssignmentModal({
           maxHeight: '90vh',
           overflowY: 'auto',
           padding: '0',
+          opacity: isLoading ? 0.75 : 1,
+          pointerEvents: isLoading ? 'none' : 'auto',
+          transition: 'opacity 0.15s',
         }}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* ── Header ────────────────────────────────────────────────────── */}
+        {/* Header */}
         <div style={{
           display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between',
           padding: '20px 24px 14px',
@@ -126,21 +145,20 @@ export function SmartAssignmentModal({
         }}>
           <div>
             <h2 style={{ margin: 0, fontSize: '16px', fontWeight: '700', color: '#0f172a' }}>
-              Smart Assignment
+              {isLoading ? 'Assigning\u2026' : 'Smart Assignment'}
             </h2>
             <p style={{ margin: '4px 0 0', fontSize: '12px', color: '#64748b' }}>
               You are assigning{' '}
               <strong style={{ color: '#1d4ed8' }}>{count} member{count !== 1 ? 's' : ''}</strong>
-              {' '}to{' '}
+              {' to '}
               <strong style={{ color: '#0f172a' }}>{activity}</strong>
             </p>
 
             {/* Member avatar strip */}
             <div style={{ display: 'flex', gap: '4px', marginTop: '10px', flexWrap: 'wrap' }}>
-              {pendingGroup.bookings.slice(0, 8).map((b) => {
-                const id = b.memberPhone || b.phone || b.sk;
-                return <Avatar key={b.sk} identifier={id} />;
-              })}
+              {pendingGroup.bookings.slice(0, 8).map((b) => (
+                <Avatar key={b.sk} booking={b} />
+              ))}
               {pendingGroup.bookings.length > 8 && (
                 <div style={{
                   width: 28, height: 28, borderRadius: '50%',
@@ -162,11 +180,11 @@ export function SmartAssignmentModal({
               padding: '0 4px', marginTop: '-2px',
             }}
           >
-            ×
+            x
           </button>
         </div>
 
-        {/* ── Two-column body ────────────────────────────────────────────── */}
+        {/* Two-column body */}
         <div style={{
           display: 'grid',
           gridTemplateColumns: '1fr auto 1fr',
@@ -174,13 +192,10 @@ export function SmartAssignmentModal({
           padding: '0 0 20px',
         }}>
 
-          {/* ── Option A: Merge ─────────────────────────────────────────── */}
+          {/* Option A: Merge */}
           <div style={{ padding: '20px 24px' }}>
             <div style={{ marginBottom: '14px' }}>
-              <span style={{
-                fontSize: '11px', fontWeight: '800', letterSpacing: '0.06em',
-                color: '#1d4ed8', textTransform: 'uppercase',
-              }}>
+              <span style={{ fontSize: '11px', fontWeight: '800', letterSpacing: '0.06em', color: '#1d4ed8', textTransform: 'uppercase' }}>
                 Option A
               </span>
               <h3 style={{ margin: '4px 0 0', fontSize: '13px', fontWeight: '700', color: '#0f172a' }}>
@@ -190,14 +205,14 @@ export function SmartAssignmentModal({
 
             {schedules.length === 0 ? (
               <p style={{ fontSize: '12px', color: '#94a3b8', fontStyle: 'italic' }}>
-                No matching classes found in the current date range.
+                No classes found in the current date range.
               </p>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
                 {schedules.map((s) => {
-                  const coachName = coaches.find((c) => c.phone === s.coachPhone)?.name || s.coachPhone;
-                  const facName   = facilities.find((f) => f.facilityId === s.facilityId)?.name || s.facilityId;
-                  const occ       = s.currentOccupancy ?? 0;
+                  const coachName  = coaches.find((c) => c.phone === s.coachPhone)?.name || s.coachPhone;
+                  const facName    = facilities.find((f) => f.facilityId === s.facilityId)?.name || s.facilityId;
+                  const occ        = s.currentOccupancy ?? 0;
                   const isSelected = selectedScheduleId === s.scheduleId;
                   return (
                     <label key={s.scheduleId} style={{
@@ -218,12 +233,15 @@ export function SmartAssignmentModal({
                         style={{ marginTop: '2px', accentColor: '#1d4ed8' }}
                       />
                       <div>
-                        <div style={{ fontSize: '12px', fontWeight: '600', color: '#1e293b' }}>
+                        <div style={{ fontSize: '12px', fontWeight: '700', color: '#0f172a' }}>
+                          {s.activityType}
+                        </div>
+                        <div style={{ fontSize: '11px', color: '#475569', marginTop: '2px' }}>
                           {new Date(s.date + 'T12:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}
                           {' @ '}{s.startTime.slice(0, 5)}
                         </div>
                         <div style={{ fontSize: '11px', color: '#64748b', marginTop: '2px' }}>
-                          Coach {coachName} · {facName}
+                          Coach {coachName} {String.fromCharCode(183)} {facName}
                         </div>
                         <div style={{ fontSize: '11px', marginTop: '3px' }}>
                           <span style={{
@@ -241,24 +259,41 @@ export function SmartAssignmentModal({
               </div>
             )}
 
+            {/* Member name list */}
+            {pendingGroup.bookings.length > 0 && (
+              <div style={{ marginBottom: '12px' }}>
+                <div style={{ fontSize: '11px', fontWeight: '600', color: '#94a3b8', marginBottom: '6px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Members to assign
+                </div>
+                <ul style={{ margin: 0, padding: 0, listStyle: 'none', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  {pendingGroup.bookings.map((b) => (
+                    <li key={b.sk} style={{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+                      <Avatar booking={b} />
+                      <span style={{ fontSize: '11px', color: '#475569' }}>{bookingLabel(b)}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
             <button
               onClick={handleMerge}
-              disabled={!selectedScheduleId}
+              disabled={!selectedScheduleId || isLoading}
               style={{
                 width: '100%', padding: '10px',
-                background: selectedScheduleId ? '#1d4ed8' : '#e2e8f0',
-                color: selectedScheduleId ? '#fff' : '#94a3b8',
+                background: selectedScheduleId && !isLoading ? '#1d4ed8' : '#e2e8f0',
+                color: selectedScheduleId && !isLoading ? '#fff' : '#94a3b8',
                 border: 'none', borderRadius: '8px',
                 fontSize: '12px', fontWeight: '700',
-                cursor: selectedScheduleId ? 'pointer' : 'not-allowed',
+                cursor: selectedScheduleId && !isLoading ? 'pointer' : 'not-allowed',
                 transition: 'all 0.15s',
               }}
             >
-              [ Merge {count} Member{count !== 1 ? 's' : ''} Here ]
+              {isLoading ? 'Assigning\u2026' : `Merge ${count} Member${count !== 1 ? 's' : ''} Here`}
             </button>
           </div>
 
-          {/* ── Divider ──────────────────────────────────────────────────── */}
+          {/* Divider */}
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
             padding: '0 4px',
@@ -276,13 +311,10 @@ export function SmartAssignmentModal({
             <div style={{ width: 1, flex: 1, background: '#e2e8f0' }} />
           </div>
 
-          {/* ── Option B: Create New ─────────────────────────────────────── */}
+          {/* Option B: Create New */}
           <div style={{ padding: '20px 24px' }}>
             <div style={{ marginBottom: '14px' }}>
-              <span style={{
-                fontSize: '11px', fontWeight: '800', letterSpacing: '0.06em',
-                color: '#0891b2', textTransform: 'uppercase',
-              }}>
+              <span style={{ fontSize: '11px', fontWeight: '800', letterSpacing: '0.06em', color: '#0891b2', textTransform: 'uppercase' }}>
                 Option B
               </span>
               <h3 style={{ margin: '4px 0 0', fontSize: '13px', fontWeight: '700', color: '#0f172a' }}>
@@ -290,40 +322,28 @@ export function SmartAssignmentModal({
               </h3>
             </div>
 
-            {/* Form */}
             <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '16px' }}>
-              {/* Date */}
               <div>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
-                  Date
-                </label>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>Date</label>
                 <input type="date" value={newDate} onChange={(e) => setNewDate(e.target.value)}
                   style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', boxSizing: 'border-box' }} />
               </div>
 
-              {/* Time row */}
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
                 <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
-                    Start
-                  </label>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>Start</label>
                   <input type="time" value={newStartTime} onChange={(e) => setNewStartTime(e.target.value)}
                     style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', boxSizing: 'border-box' }} />
                 </div>
                 <div>
-                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
-                    End
-                  </label>
+                  <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>End</label>
                   <input type="time" value={newEndTime} onChange={(e) => setNewEndTime(e.target.value)}
                     style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', boxSizing: 'border-box' }} />
                 </div>
               </div>
 
-              {/* Coach */}
               <div>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
-                  Coach
-                </label>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>Coach</label>
                 <select value={newCoach} onChange={(e) => setNewCoach(e.target.value)}
                   style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', background: '#fff', boxSizing: 'border-box' }}>
                   <option value="">Select Coach</option>
@@ -333,11 +353,8 @@ export function SmartAssignmentModal({
                 </select>
               </div>
 
-              {/* Facility */}
               <div>
-                <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>
-                  Facility
-                </label>
+                <label style={{ display: 'block', fontSize: '11px', fontWeight: '600', color: '#475569', marginBottom: '4px' }}>Facility</label>
                 <select value={newFacility} onChange={(e) => setNewFacility(e.target.value)}
                   style={{ width: '100%', padding: '7px 10px', border: '1px solid #e2e8f0', borderRadius: '6px', fontSize: '12px', background: '#fff', boxSizing: 'border-box' }}>
                   <option value="">Select Hall</option>
@@ -350,19 +367,20 @@ export function SmartAssignmentModal({
 
             <button
               onClick={handleCreate}
+              disabled={isLoading}
               style={{
                 width: '100%', padding: '10px',
-                background: '#0891b2',
-                color: '#fff',
+                background: isLoading ? '#e2e8f0' : '#0891b2',
+                color: isLoading ? '#94a3b8' : '#fff',
                 border: 'none', borderRadius: '8px',
                 fontSize: '12px', fontWeight: '700',
-                cursor: 'pointer',
+                cursor: isLoading ? 'not-allowed' : 'pointer',
                 transition: 'background 0.15s',
               }}
-              onMouseEnter={(e) => (e.currentTarget.style.background = '#0e7490')}
-              onMouseLeave={(e) => (e.currentTarget.style.background = '#0891b2')}
+              onMouseEnter={(e) => { if (!isLoading) e.currentTarget.style.background = '#0e7490'; }}
+              onMouseLeave={(e) => { if (!isLoading) e.currentTarget.style.background = '#0891b2'; }}
             >
-              [ Create &amp; Assign All ]
+              {isLoading ? 'Assigning\u2026' : 'Create & Assign All'}
             </button>
           </div>
         </div>
