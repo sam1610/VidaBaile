@@ -92,7 +92,7 @@ async function createBroadcastRecord(
 ): Promise<void> {
   try {
     let updateExpr =
-      "SET entityType = :type, templateName = :tn, broadcastType = :bt, promotionalContent = :pc, targetTier = :tt, targetStatus = :ts, targetGender = :tg, targetMemberCount = :tmc, updatedAt = :now, broadcastStatus = :status, gsi1sk = :gsisk";
+      "SET entityType = :type, templateName = :tn, broadcastType = :bt, promotionalContent = :pc, targetTier = :tt, targetStatus = :ts, targetGender = :tg, targetMemberCount = :tmc, createdAt = :now, updatedAt = :now, broadcastStatus = :status, gsi1sk = :gsisk";
 
     const exprVals: any = {
       ":type": { S: "BROADCAST" },
