@@ -347,6 +347,11 @@ export const ActivitiesTab = () => {
 
     try {
       // 1. Update the booking record in-place
+      // Strip any accidental SCHEDULE# prefix so gsi2pk is never double-prefixed
+      const cleanScheduleId = targetSchedule.scheduleId.replace('SCHEDULE#', '');
+      const gsi2pkValue     = `${adminSub}#SCHEDULE#${cleanScheduleId}`;
+      const gsi2skValue     = `DATETIME#${booking.bookedAt || now}`;
+
       const { errors } = await (client.models as any).ClubRecord.update({
         pk:           adminSub,
         sk:           booking.sk,
@@ -354,6 +359,8 @@ export const ActivitiesTab = () => {
         activityType: targetSchedule.activityType,
         status:       'CONFIRMED',
         gsi1sk:       'STATUS#CONFIRMED',
+        gsi2pk:       gsi2pkValue,
+        gsi2sk:       gsi2skValue,
         date:         targetSchedule.date,
         startTime:    targetSchedule.startTime,
         endTime:      targetSchedule.endTime,
