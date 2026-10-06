@@ -92,13 +92,20 @@ function NewCampaignModal({
   const [activeTab, setActiveTab] = useState<ModalTab>('details');
 
   // ── Campaign Details form ──────────────────────────────────────────────────
+  // Format current local date-time as "YYYY-MM-DDTHH:MM" for datetime-local input
+  const localDateTimeNow = (): string => {
+    const d = new Date();
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  };
+
   const defaultForm = (): CampaignForm => ({
     name:                  '',
     packageRef:            '',
     validFrom:             new Date().toISOString().split('T')[0],
     validUntil:            new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
     campaignStatus:        'SCHEDULED',
-    launchDateTime:        '',
+    launchDateTime:        localDateTimeNow(),
     promotionalContent:    '',
     campaignKnowledgeBase: '',
   });
@@ -257,6 +264,14 @@ function NewCampaignModal({
 
   if (!isOpen) return null;
 
+  const isFormValid =
+    form.name.trim() !== '' &&
+    form.packageRef   !== '' &&
+    form.validFrom    !== '' &&
+    form.validUntil   !== '' &&
+    form.launchDateTime !== '' &&
+    form.promotionalContent.trim() !== '';
+
   const disabled = isSubmitting;
 
   return (
@@ -396,10 +411,12 @@ function NewCampaignModal({
                          borderRadius:'4px', cursor:'pointer', fontWeight:600, fontSize:'12px' }}>
                 Cancel
               </button>
-              <button type="submit" disabled={disabled}
+              <button type="submit" disabled={disabled || !isFormValid}
                 style={{ flex:1, padding:'10px', background:'#2e3b50', color:'white',
-                         border:'none', borderRadius:'4px', cursor:'pointer', fontWeight:600,
-                         fontSize:'12px', opacity: disabled ? 0.6 : 1 }}>
+                         border:'none', borderRadius:'4px',
+                         cursor: (disabled || !isFormValid) ? 'not-allowed' : 'pointer',
+                         fontWeight:600, fontSize:'12px',
+                         opacity: (disabled || !isFormValid) ? 0.4 : 1 }}>
                 {isSubmitting ? 'Saving…' : 'Schedule Campaign'}
               </button>
             </div>
@@ -629,7 +646,7 @@ export const PRMarketingTab = () => {
       const parsedLaunch = form.launchDateTime ? new Date(form.launchDateTime) : null;
       const launchIso = parsedLaunch && !isNaN(parsedLaunch.getTime())
         ? parsedLaunch.toISOString()
-        : new Date().toISOString(); // fallback to now if somehow empty
+        : new Date().toISOString(); // fallback: form validation prevents this path
 
       await DatabaseService.createCampaign(adminSub, {
         campaignId,
