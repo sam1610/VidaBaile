@@ -825,10 +825,11 @@ export async function getMemberByPhoneRecord(adminSub: string, phone: string): P
       sk: `MEMBER#${phone}`,
     });
 
-    if (!result) return null;
-    if (!isMember(result)) throw new Error('Retrieved record is not a Member');
+    const item = result?.data ?? result;
+    if (!item) return null;
+    if (!isMember(item)) throw new Error('Retrieved record is not a Member');
 
-    return result;
+    return item;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to get member';
     console.error('getMemberByPhoneRecord error:', error);
@@ -856,10 +857,11 @@ export async function getCoachByPhoneRecord(adminSub: string, phone: string): Pr
       sk: `COACH#${phone}`,
     });
 
-    if (!result) return null;
-    if (!isCoach(result)) throw new Error('Retrieved record is not a Coach');
+    const item = result?.data ?? result;
+    if (!item) return null;
+    if (!isCoach(item)) throw new Error('Retrieved record is not a Coach');
 
-    return result;
+    return item;
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Failed to get coach';
     console.error('getCoachByPhoneRecord error:', error);
@@ -1791,17 +1793,25 @@ export async function dispatchScheduleNotifications(
   let coachName    = schedule?.coachPhone ?? 'Our Team';
   let facilityName = schedule?.facilityId ?? 'Studio';
 
-  try {
-    if (schedule?.coachPhone) {
+  // Resolve Coach name — independent try-catch so a missing coach record
+  // never prevents the Facility lookup from running.
+  if (schedule?.coachPhone) {
+    try {
       const coachRecord = (await getCoachByPhoneRecord(adminSub, schedule.coachPhone)) as any;
       if (coachRecord?.name) coachName = coachRecord.name;
+    } catch (err) {
+      console.warn('[DB Service] Could not fetch coach name for notification:', err);
     }
-    if (schedule?.facilityId) {
+  }
+
+  // Resolve Facility name — independent of the Coach lookup above.
+  if (schedule?.facilityId) {
+    try {
       const facilityRecord = (await getFacilityByIdRecord(adminSub, schedule.facilityId)) as any;
       if (facilityRecord?.name) facilityName = facilityRecord.name;
+    } catch (err) {
+      console.warn('[DB Service] Could not fetch facility name for notification:', err);
     }
-  } catch (err) {
-    console.warn('[DB Service] Could not fetch friendly names for notification:', err);
   }
 
   // Build a fully-detailed WhatsApp message for the confirmed class
