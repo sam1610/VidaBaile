@@ -2427,6 +2427,7 @@ export default {
   createBookingRecord,
   deleteBookingRecord,
   queryBookingsBySchedule,
+  queryBookingsByMember,
   assignBookingToSchedule,
   batchAssignBookingsToSchedule,
   dispatchScheduleNotifications,

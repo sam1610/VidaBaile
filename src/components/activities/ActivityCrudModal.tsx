@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react';
 import { nanoid } from 'nanoid';
+import { generateClient } from 'aws-amplify/data';
+import type { Schema } from '../../../amplify/data/resource';
 import DatabaseService from '../../services/DatabaseService';
 import '../common/Modal.css';
 
@@ -142,20 +144,24 @@ export function ActivityCrudModal({
 
           console.log('[ActivityCrudModal] Raw bookings from DB:', bookings);
 
-          // Resilient phone extraction: covers all data shapes written by
-          // the flow endpoint (phone), engine patchBookings (phone on original
-          // record), and any legacy shape where only the sk encodes the phone.
-          const memberPhones: string[] = bookings
+          // Resilient phone extraction: covers drag-and-drop assignments (where
+          // phone / memberPhone are set), engine records (sk-encoded phone),
+          // and legacy shapes.
+          const rawPhones: string[] = bookings
             .map((b: any): string | null => {
               if (b.phone)       return b.phone;
               if (b.memberPhone) return b.memberPhone;
-              // Last resort: parse sk pattern BOOKING#<id>#MEMBER#<phone>
+              // Last resort: parse sk pattern BOOKING#<id>#MEMBER#<phone>[#SCHEDULE#...]
               if (b.sk && b.sk.includes('MEMBER#')) {
                 return b.sk.split('MEMBER#')[1]?.split('#')[0] ?? null;
               }
               return null;
             })
             .filter((p): p is string => Boolean(p));
+
+          // Deduplicate: multiple booking records can reference the same member
+          // (e.g. a drag-and-drop record plus a legacy engine record).
+          const memberPhones: string[] = [...new Set(rawPhones)];
 
           console.log(
             '[ActivityCrudModal] Resolved member phones:',
@@ -330,35 +336,129 @@ export function ActivityCrudModal({
       await onSubmit(schedulePayload, scheduleId, isEditMode);
 
       // Step 2: Calculate membership changes
-      const membersToAdd = selectedMembers.filter((p) => !originalMembers.includes(p));
+      const membersToAdd    = selectedMembers.filter((p) => !originalMembers.includes(p));
       const membersToRemove = originalMembers.filter((p) => !selectedMembers.includes(p));
 
       console.log('[ActivityCrudModal] Members to add:', membersToAdd);
       console.log('[ActivityCrudModal] Members to remove:', membersToRemove);
 
-      // Step 3: Batch mutations
-      const addPromises = membersToAdd.map((memberPhone) =>
-        DatabaseService.createBookingRecord(adminSub, nanoid(), memberPhone, {
-          scheduleId,
-          coachPhone: formData.coachPhone,
-          bookedAt: new Date().toISOString(),
-          // Denormalize schedule data for fast lookups in enrollments modal (use schema field names)
-          activityType: formData.activityType,
-          date: formData.date,
-          startTime: formData.startTime,
-          endTime: formData.endTime,
-        })
-      );
+      // Step 3: Batch mutations — use in-place UPDATE so existing booking records
+      // (written by drag-and-drop or the scheduling engine) are never duplicated.
+      if (membersToAdd.length > 0 || membersToRemove.length > 0) {
+        const _client = generateClient<Schema>();
+        const now     = new Date().toISOString();
+        const cleanScheduleId = scheduleId.replace('SCHEDULE#', '');
 
-      const removePromises = membersToRemove.map((memberPhone) => {
-        // Find the booking ID for this member/schedule combination
-        // For now, we'll need to use a queryBookingsByMember approach or construct from data
-        // Since we don't have bookingId readily available, we'll query existing bookings
-        return DatabaseService.deleteBookingRecord(adminSub, nanoid(), memberPhone, scheduleId);
-      });
+        // ── Assign: update or create booking record ───────────────────────
+        const addPromises = membersToAdd.map(async (memberPhone) => {
+          // Look for an existing booking for this member (any status / schedule)
+          let existingBookingSk: string | null = null;
+          try {
+            const memberBookings = await DatabaseService.queryBookingsByMember(
+              adminSub, memberPhone
+            );
+            // Prefer a booking already linked to this schedule; fall back to any booking
+            const linked = memberBookings.find(
+              (b: any) =>
+                (b.scheduleId && b.scheduleId.replace('SCHEDULE#', '') === cleanScheduleId) ||
+                (b.sk && b.sk.includes(cleanScheduleId))
+            );
+            const anyBooking = linked ?? memberBookings[0];
+            existingBookingSk = anyBooking?.sk ?? null;
+          } catch (e) {
+            console.warn('[ActivityCrudModal] queryBookingsByMember failed for', memberPhone, e);
+          }
 
-      // Wait for all booking mutations
-      if (addPromises.length > 0 || removePromises.length > 0) {
+          if (existingBookingSk) {
+            // UPDATE the existing booking in-place
+            const { errors } = await (_client.models as any).ClubRecord.update({
+              pk:           adminSub,
+              sk:           existingBookingSk,
+              scheduleId:   cleanScheduleId,
+              activityType: formData.activityType,
+              date:         formData.date,
+              startTime:    formData.startTime,
+              endTime:      formData.endTime,
+              coachPhone:   formData.coachPhone,
+              status:       'CONFIRMED',
+              gsi1sk:       'STATUS#CONFIRMED',
+              gsi2pk:       `${adminSub}#SCHEDULE#${cleanScheduleId}`,
+              gsi2sk:       `DATETIME#${now}`,
+              updatedAt:    now,
+            });
+            if (errors?.length) {
+              console.error('[ActivityCrudModal] update booking error:', errors);
+            }
+          } else {
+            // No existing booking — create a fresh one
+            await DatabaseService.createBookingRecord(adminSub, nanoid(), memberPhone, {
+              scheduleId:   cleanScheduleId,
+              coachPhone:   formData.coachPhone,
+              bookedAt:     now,
+              activityType: formData.activityType,
+              date:         formData.date,
+              startTime:    formData.startTime,
+              endTime:      formData.endTime,
+            });
+          }
+        });
+
+        // ── Unassign: move booking back to PENDING queue ──────────────────
+        // Find the exact booking sk so we never guess at a composite key.
+        const removePromises = membersToRemove.map(async (memberPhone) => {
+          let targetSk: string | null = null;
+          try {
+            // First try the schedule-specific GSI2 index (most precise)
+            const scheduleBookings = await DatabaseService.queryBookingsBySchedule(
+              adminSub, cleanScheduleId
+            );
+            const hit = scheduleBookings.find((b: any) =>
+              b.phone       === memberPhone ||
+              b.memberPhone === memberPhone ||
+              (b.sk && b.sk.includes(memberPhone))
+            );
+            targetSk = hit?.sk ?? null;
+
+            // Fallback: member-level GSI1 query
+            if (!targetSk) {
+              const memberBookings = await DatabaseService.queryBookingsByMember(
+                adminSub, memberPhone
+              );
+              const linked = memberBookings.find((b: any) =>
+                (b.scheduleId && b.scheduleId.replace('SCHEDULE#', '') === cleanScheduleId) ||
+                (b.sk && b.sk.includes(cleanScheduleId))
+              );
+              targetSk = linked?.sk ?? null;
+            }
+          } catch (e) {
+            console.warn('[ActivityCrudModal] booking lookup failed for unassign', memberPhone, e);
+          }
+
+          if (!targetSk) {
+            console.warn('[ActivityCrudModal] no booking found to unassign for', memberPhone);
+            return;
+          }
+
+          // UPDATE in-place: clear schedule assignment, return to pending queue
+          const { errors } = await (_client.models as any).ClubRecord.update({
+            pk:           adminSub,
+            sk:           targetSk,
+            scheduleId:   '',
+            activityType: '',
+            date:         '',
+            startTime:    '',
+            endTime:      '',
+            status:       'PENDING_SCHEDULING',
+            gsi1sk:       'STATUS#PENDING_SCHEDULING',
+            gsi2pk:       '',
+            gsi2sk:       '',
+            updatedAt:    now,
+          });
+          if (errors?.length) {
+            console.error('[ActivityCrudModal] unassign booking error:', errors);
+          }
+        });
+
         await Promise.all([...addPromises, ...removePromises]);
         console.log('[ActivityCrudModal] Batched enrollment mutations completed');
       }
@@ -514,7 +614,7 @@ const getTierIcon = (tier?: string) => {
               transition: 'all 0.2s ease',
             }}
           >
-            Members Enrollment ({selectedMembers.length})
+            Members Enrollment ({[...new Set(selectedMembers)].length})
           </button>
         </div>
 
@@ -853,11 +953,13 @@ const getTierIcon = (tier?: string) => {
                       </tr>
                     ) : (
                       filteredMembers.map((member) => (
-                        <tr key={member.phone} style={{ borderBottom: '1px solid #f0f0f0', background: selectedMembers.includes(member.phone) ? '#f0f8ff' : 'white' }}>
+                        <tr key={member.phone} style={{ borderBottom: '1px solid #f0f0f0', background: selectedMembers.some(p => p === member.phone) ? '#f0f8ff' : 'white' }}>
                           <td style={{ padding: '10px', textAlign: 'center' }}>
                             <input
                               type="checkbox"
-                              checked={selectedMembers.includes(member.phone)}
+                              checked={selectedMembers.some(
+                                p => p === member.phone
+                              )}
                               onChange={() => handleMemberToggle(member.phone)}
                               disabled={isLoading || isSubmitting}
                               style={{ cursor: 'pointer' }}
