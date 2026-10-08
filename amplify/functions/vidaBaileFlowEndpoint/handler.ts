@@ -70,61 +70,86 @@ function resolveBroadcastId(decryptedData: any): string | null {
 // 3. Data Fetching Helpers
 // ────────────────────────────────────────────────────────────────────────────
 
-async function fetchActivePackages(adminSub: string, broadcastId: string | null) {
+/**
+ * fetchPackagesForInit
+ *
+ * SCENARIO A — broadcast flow_token present:
+ *   Step 1: GetItem BROADCAST#<broadcastId>  → extract packageRef / packageIntent
+ *   Step 2: GetItem CATALOG#<packageId>      → real name and price from catalog
+ *   No date filtering — the Admin's dispatch decision is trusted unconditionally.
+ *
+ * SCENARIO B — chat-agent flow (no broadcastId):
+ *   Query all active CATALOG records and return them.
+ */
+async function fetchPackagesForInit(
+  adminSub: string,
+  broadcastId: string | null
+): Promise<Array<{ id: string; title: string; description: string }>> {
+
   if (broadcastId) {
-    // ── SCENARIO A: User clicked a Broadcast Message ──
-    // Fetch this exact broadcast record by primary key — no date filtering.
-    // The Admin explicitly dispatched this campaign to this member; we trust
-    // that decision unconditionally. Date-based blocking here would silently
-    // hide the package from a member who received a valid invitation.
-    const res = await ddb.send(new GetItemCommand({
+    // ── Step 1: fetch the specific BROADCAST record ───────────────────────
+    const broadcastRes = await ddb.send(new GetItemCommand({
       TableName: TABLE_NAME,
-      Key: {
-        pk: { S: adminSub },
-        sk: { S: `BROADCAST#${broadcastId}` },
-      },
+      Key: { pk: { S: adminSub }, sk: { S: `BROADCAST#${broadcastId}` } },
     }));
 
-    const item = res.Item;
-    if (!item) {
-      // Broadcast record missing — fall through to catalog list as safe fallback
-      console.warn(`fetchActivePackages: BROADCAST#${broadcastId} not found, falling back to catalog`);
-      return fetchCatalogPackages(adminSub);
+    const broadcastItem = broadcastRes.Item;
+    if (!broadcastItem) {
+      console.warn(`fetchPackagesForInit: BROADCAST#${broadcastId} not found for admin ${adminSub}`);
+      return [];
     }
 
-    const bId = broadcastId;
-    const cId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
+    // packageRef is stored as "CATALOG#<id>" — strip the prefix to get the raw id
+    const rawRef       = broadcastItem.packageRef?.S || broadcastItem.packageIntent?.S || "";
+    const catalogId    = rawRef.replace("CATALOG#", "");
+
+    if (!catalogId) {
+      console.warn(`fetchPackagesForInit: broadcast ${broadcastId} has no packageRef`);
+      return [];
+    }
+
+    // ── Step 2: fetch the specific CATALOG record for real name + price ───
+    const catalogRes = await ddb.send(new GetItemCommand({
+      TableName: TABLE_NAME,
+      Key: { pk: { S: adminSub }, sk: { S: `CATALOG#${catalogId}` } },
+    }));
+
+    const catalogItem = catalogRes.Item;
+    const title = catalogItem?.name?.S
+      || catalogItem?.packageType?.S
+      || broadcastItem.name?.S
+      || "Dance Package";
+    const price = catalogItem?.price?.N ?? catalogItem?.price?.S;
+    const description = price
+      ? `Price: ${price} BHD. ${broadcastItem.promotionalContent?.S?.substring(0, 40) || ""}`.trim()
+      : (broadcastItem.promotionalContent?.S?.substring(0, 60) || "Exclusive offer");
+
+    console.log(`fetchPackagesForInit: resolved catalog "${title}" (id: ${catalogId}) for broadcast ${broadcastId}`);
+
     return [{
-      id: `${bId}|${cId}`,
-      title: item.name?.S || "Dance Package",
-      description: item.promotionalContent?.S
-        ? item.promotionalContent.S.substring(0, 60)
-        : "Exclusive offer",
+      id: `${broadcastId}|${catalogId}`,
+      title,
+      description,
     }];
 
   } else {
-    // ── SCENARIO B: User asked the Chat Agent directly ──
-    return fetchCatalogPackages(adminSub);
+    // ── SCENARIO B: Chat Agent — return all active catalog packages ───────
+    const res = await ddb.send(new QueryCommand({
+      TableName: TABLE_NAME,
+      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+      ExpressionAttributeValues: { ":pk": { S: adminSub }, ":prefix": { S: "CATALOG#" } },
+    }));
+    return (res.Items || [])
+      .filter(item => (item.status?.S || "ACTIVE") === "ACTIVE")
+      .map(item => {
+        const catalogPackageId = (item.sk?.S || "").replace("CATALOG#", "");
+        return {
+          id: catalogPackageId,
+          title: item.name?.S || item.packageType?.S || "Dance Package",
+          description: `Price: ${item.price?.N ?? item.price?.S ?? "Contact for price"} BHD.`,
+        };
+      });
   }
-}
-
-// Shared helper: return all active CATALOG packages for the Chat Agent path
-async function fetchCatalogPackages(adminSub: string) {
-  const res = await ddb.send(new QueryCommand({
-    TableName: TABLE_NAME,
-    KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-    ExpressionAttributeValues: { ":pk": { S: adminSub }, ":prefix": { S: "CATALOG#" } },
-  }));
-  return (res.Items || [])
-    .filter(item => (item.status?.S || "ACTIVE") === "ACTIVE")
-    .map(item => {
-      const catalogPackageId = (item.sk?.S || "").replace("CATALOG#", "");
-      return {
-        id: catalogPackageId,
-        title: item.name?.S || item.packageType?.S || "Dance Package",
-        description: `Price: ${item.price?.N ?? item.price?.S ?? "Contact for price"} BHD.`,
-      };
-    });
 }
 async function fetchPackageById(adminSub: string, packageId: string) {
   const res = await ddb.send(new GetItemCommand({
@@ -213,13 +238,15 @@ export const handler = async (event: any) => {
     // ── ROUTING STATE MACHINE ──
     if (decryptedData.action === "INIT") {
       const t0 = Date.now();
-      const activePackages = await fetchActivePackages(adminSub, broadcastId);
-      console.log(`⏱️ fetchActivePackages: ${Date.now() - t0}ms, found ${activePackages.length} packages`);
-      console.log(`📦 Found ${activePackages.length} packages for Admin: ${adminSub}`);
+      // Fetch the specific targeted package (broadcast path) or full catalog (chat path).
+      // Two explicit GetItemCommand calls in SCENARIO A — no date filtering anywhere.
+      const packagesList = await fetchPackagesForInit(adminSub, broadcastId);
+      console.log(`⏱️ fetchPackagesForInit: ${Date.now() - t0}ms, found ${packagesList.length} package(s)`);
+      console.log(`📦 Packages resolved for admin ${adminSub}:`, packagesList.map(p => p.title));
 
       responseScreen = "Packages_Screen";
       responseData = {
-        packages_list: activePackages // Matches "${data.packages_list}" in Flow JSON
+        packages_list: packagesList, // Matches "${data.packages_list}" in Flow JSON
       };
       console.log(`📋 INIT response payload:`, JSON.stringify(responseData));
     }
@@ -230,9 +257,9 @@ export const handler = async (event: any) => {
       // ── 0. Meta routing error notification — log and return Packages_Screen gracefully ──
       if (payload.error === "invalid-screen-transition") {
         console.error(`❌ Meta routing error: ${payload.error_message}`);
-        const activePackages = await fetchActivePackages(adminSub, broadcastId);
+        const packagesList = await fetchPackagesForInit(adminSub, broadcastId);
         responseScreen = "Packages_Screen";
-        responseData = { packages_list: activePackages };
+        responseData = { packages_list: packagesList };
       }
       
       // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
@@ -427,10 +454,10 @@ export const handler = async (event: any) => {
       else {
         // Unknown action — log it so we can diagnose unexpected payloads
         console.error(`❌ Unknown data_exchange action: ${payload?.action}. Full payload:`, JSON.stringify(payload));
-        // Return the packages screen as a safe fallback so the user isn't stuck
-        const activePackages = await fetchActivePackages(adminSub, broadcastId);
+        // Return the packages screen as a safe fallback so the user is not stuck
+        const packagesList = await fetchPackagesForInit(adminSub, broadcastId);
         responseScreen = "Packages_Screen";
-        responseData = { packages_list: activePackages };
+        responseData = { packages_list: packagesList };
       }
     }
 
