@@ -605,9 +605,30 @@ export const ActivitiesTab = () => {
                             }}>
                               {assignedSched ? (
                                 <>
-                                  <div><strong>Class:</strong> {assignedSched.activityType}</div>
-                                  <div><strong>Date:</strong>  {assignedSched.date}</div>
-                                  <div><strong>Time:</strong>  {assignedSched.startTime} - {assignedSched.endTime}</div>
+                                  {/* Class name — single column */}
+                                  <div style={{ marginBottom: '3px' }}>
+                                    <strong>Class:</strong> {assignedSched.activityType}
+                                  </div>
+
+                                  {/* Date row — assigned on left, member-selected on right */}
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px', marginBottom: '2px' }}>
+                                    <span><strong>Date:</strong> {assignedSched.date}</span>
+                                    {b.date && b.date !== assignedSched.date && (
+                                      <span style={{ fontSize: '9px', color: '#3b82f6', whiteSpace: 'nowrap' }}>
+                                        Selected: {b.date}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Time row — assigned on left, member-selected on right */}
+                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px' }}>
+                                    <span><strong>Time:</strong> {assignedSched.startTime} - {assignedSched.endTime}</span>
+                                    {b.startTime && b.startTime !== assignedSched.startTime && (
+                                      <span style={{ fontSize: '9px', color: '#3b82f6', whiteSpace: 'nowrap' }}>
+                                        Selected: {b.startTime}
+                                      </span>
+                                    )}
+                                  </div>
                                 </>
                               ) : (
                                 <div>Schedule ID: {b.scheduleId}</div>
