@@ -102,8 +102,6 @@ export function ActivityCrudModal({
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [dataLoading, setDataLoading] = useState(false);
-  // When true the modal will dispatch WhatsApp notifications after saving
-  const [notifyOnSave, setNotifyOnSave] = useState(false);
 
   // Hydrate form + fetch enrolled members when modal opens or active schedule changes.
   // Inlined as a single async effect so the booking fetch always runs with the
@@ -191,7 +189,6 @@ export function ActivityCrudModal({
         setOriginalMembers([]);
         setErrors({});
         setActiveTab('activity');
-        setNotifyOnSave(false);
       }
     };
 
@@ -463,18 +460,34 @@ export function ActivityCrudModal({
         console.log('[ActivityCrudModal] Batched enrollment mutations completed');
       }
 
-      // Dispatch WhatsApp notifications to all enrolled members if requested
-      if (notifyOnSave && selectedMembers.length > 0) {
+      // Dispatch WhatsApp notifications whenever the schedule is CONFIRMED,
+      // regardless of how the status was set. Using schedulePayload.status as
+      // the single source of truth avoids the notifyOnSave flag being out of
+      // sync when the Admin saves without clicking "Approve" first.
+      if (schedulePayload.status === 'CONFIRMED' && selectedMembers.length > 0) {
         console.log(
-          '[ActivityCrudModal] Dispatching WhatsApp notifications to',
+          '[ActivityCrudModal] Status is CONFIRMED — dispatching WhatsApp notifications to',
           selectedMembers.length, 'member(s)'
         );
-        await DatabaseService.dispatchScheduleNotifications(
-          adminSub,
-          schedulePayload,
-          selectedMembers
-        );
-        console.log('[ActivityCrudModal] WhatsApp notifications dispatched successfully');
+        try {
+          await DatabaseService.dispatchScheduleNotifications(
+            adminSub,
+            schedulePayload,
+            selectedMembers
+          );
+          console.log('[ActivityCrudModal] WhatsApp notifications dispatched successfully');
+          alert(
+            `Class saved and WhatsApp confirmations dispatched to ${selectedMembers.length} member${selectedMembers.length !== 1 ? 's' : ''}!`
+          );
+        } catch (notifyErr) {
+          // Notification failure must not roll back the save — log and surface
+          // a non-blocking warning so the Admin knows to retry manually.
+          console.error('[ActivityCrudModal] WhatsApp dispatch failed:', notifyErr);
+          alert(
+            'Class saved successfully, but WhatsApp notifications could not be sent. ' +
+            'You can retry from the Notifications panel.'
+          );
+        }
       }
 
       onClose();
@@ -853,7 +866,6 @@ const getTierIcon = (tier?: string) => {
                         type="button"
                         onClick={() => {
                           setFormData(prev => ({ ...prev, status: 'CONFIRMED' }));
-                          setNotifyOnSave(true);
                         }}
                         style={{
                           padding: '5px 12px',
@@ -877,7 +889,6 @@ const getTierIcon = (tier?: string) => {
                         type="button"
                         onClick={() => {
                           setFormData(prev => ({ ...prev, status: 'DRAFT_PROPOSAL' }));
-                          setNotifyOnSave(false);
                         }}
                         style={{
                           padding: '5px 10px',
