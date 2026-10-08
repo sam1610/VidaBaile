@@ -61,8 +61,8 @@ function resolveTenantSub(decryptedData: any): string {
 function resolveBroadcastId(decryptedData: any): string | null {
   const token = decryptedData?.flow_token;
   if (!token) return null;
-  // Format: BUY_PACKAGE_<packageId>_CAMP#<broadcastId>_ADMIN#<adminSub>
-  const campMatch = token.match(/_CAMP#(.+?)_ADMIN#/);
+  // Extract exactly what is after _CAMP# and before the next underscore
+  const campMatch = token.match(/_CAMP#([^_]+)/);
   return campMatch?.[1] ?? null;
 }
 
