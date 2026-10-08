@@ -148,23 +148,6 @@ async function fetchActiveBroadcastByPackageId(
   return { validFrom: match.validFrom?.S, validUntil: match.validUntil?.S };
 }
 
-async function findReceiptPhone(adminSub: string, broadcastId: string): Promise<string | null> {
-  // Query all BROADCAST#<id>#MEMBER#<phone> receipts for this broadcast
-  const res = await ddb.send(new QueryCommand({
-    TableName: TABLE_NAME,
-    KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-    ExpressionAttributeValues: {
-      ":pk":     { S: adminSub },
-      ":prefix": { S: `BROADCAST#${broadcastId}#MEMBER#` },
-    },
-    Limit: 1, // Flow is single-member context — take the first match
-  }));
-  const item = res.Items?.[0];
-  if (!item) return null;
-  // Extract phone from sk: BROADCAST#<id>#MEMBER#<phone>
-  const skParts = item.sk?.S?.split("#MEMBER#");
-  return skParts?.[1] ?? item.recipientPhone?.S ?? null;
-}
 
 // ────────────────────────────────────────────────────────────────────────────
 // 4. Main Handler
@@ -248,17 +231,30 @@ export const handler = async (event: any) => {
           const broadcastId = resolveBroadcastId(decryptedData);
           let memberPhone = "UNKNOWN_PHONE";
 
-          // 1. Resolve the member's phone number
-          if (broadcastId) {
-             const receiptPhone = await findReceiptPhone(adminSub, broadcastId);
-             if (receiptPhone) memberPhone = receiptPhone;
-          } else if (decryptedData?.flow_token) {
-             try {
-               const decoded = JSON.parse(Buffer.from(decryptedData.flow_token, "base64").toString("utf8"));
-               if (decoded.phone) memberPhone = decoded.phone;
-             } catch (e) {
-               console.warn("Could not decode phone from chat token.");
-             }
+          // 1. Resolve the member's phone number from flow_token.
+          //    Priority A: broadcast token _CAMP#<id>_PHONE#<phone>_ADMIN#<sub>
+          //      Written by vidaBaileProcessOutboundQueue — each recipient carries
+          //      their own phone so multi-member broadcasts never cross-assign.
+          //    Priority B: chat-agent token — base64 JSON { phone, adminSub }
+          //    Fallback: UNKNOWN_PHONE (should never be reached in production).
+          const rawToken: string = decryptedData?.flow_token ?? "";
+
+          // Path A — broadcast token embeds _PHONE#<number>_ADMIN#
+          const phoneSegmentMatch = rawToken.match(/_PHONE#(.+?)_ADMIN#/);
+          if (phoneSegmentMatch?.[1]) {
+            memberPhone = phoneSegmentMatch[1];
+            console.log(`📱 Phone resolved from broadcast token: ${memberPhone}`);
+          } else {
+            // Path B — chat-agent base64 JSON token
+            try {
+              const decoded = JSON.parse(Buffer.from(rawToken, "base64").toString("utf8"));
+              if (decoded?.phone) {
+                memberPhone = decoded.phone;
+                console.log(`📱 Phone resolved from chat-agent token: ${memberPhone}`);
+              }
+            } catch {
+              console.warn("flow_token is not base64 JSON — falling back to UNKNOWN_PHONE");
+            }
           }
 
           // 2. ALWAYS create a unified BOOKING record for the Scheduling Engine
