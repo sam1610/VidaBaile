@@ -71,48 +71,60 @@ function resolveBroadcastId(decryptedData: any): string | null {
 // ────────────────────────────────────────────────────────────────────────────
 
 async function fetchActivePackages(adminSub: string, broadcastId: string | null) {
-  const today = new Date().toISOString().split("T")[0]; 
-
   if (broadcastId) {
     // ── SCENARIO A: User clicked a Broadcast Message ──
-    const res = await ddb.send(new QueryCommand({
+    // Fetch this exact broadcast record by primary key — no date filtering.
+    // The Admin explicitly dispatched this campaign to this member; we trust
+    // that decision unconditionally. Date-based blocking here would silently
+    // hide the package from a member who received a valid invitation.
+    const res = await ddb.send(new GetItemCommand({
       TableName: TABLE_NAME,
-      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": { S: adminSub }, ":prefix": { S: "BROADCAST#" } }
+      Key: {
+        pk: { S: adminSub },
+        sk: { S: `BROADCAST#${broadcastId}` },
+      },
     }));
-    
-    return (res.Items || []).filter(item => {
-      const validFrom = item.validFrom?.S;
-      const validUntil = item.validUntil?.S;
-      if (validFrom && validUntil) return validFrom <= today && validUntil >= today;
-      return false;
-    }).map(item => {
-      const bId = (item.sk?.S || "").replace("BROADCAST#", "");
-      const cId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
-      return {
-        id: `${bId}|${cId}`,
-        title: item.name?.S || "Dance Package",
-        description: item.promotionalContent?.S ? item.promotionalContent.S.substring(0, 60) : "Exclusive offer",
-      };
-    });
+
+    const item = res.Item;
+    if (!item) {
+      // Broadcast record missing — fall through to catalog list as safe fallback
+      console.warn(`fetchActivePackages: BROADCAST#${broadcastId} not found, falling back to catalog`);
+      return fetchCatalogPackages(adminSub);
+    }
+
+    const bId = broadcastId;
+    const cId = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
+    return [{
+      id: `${bId}|${cId}`,
+      title: item.name?.S || "Dance Package",
+      description: item.promotionalContent?.S
+        ? item.promotionalContent.S.substring(0, 60)
+        : "Exclusive offer",
+    }];
 
   } else {
     // ── SCENARIO B: User asked the Chat Agent directly ──
-    const res = await ddb.send(new QueryCommand({
-      TableName: TABLE_NAME,
-      KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
-      ExpressionAttributeValues: { ":pk": { S: adminSub }, ":prefix": { S: "CATALOG#" } }
-    }));
-    
-    return (res.Items || []).filter(item => (item.status?.S || "ACTIVE") === "ACTIVE").map(item => {
+    return fetchCatalogPackages(adminSub);
+  }
+}
+
+// Shared helper: return all active CATALOG packages for the Chat Agent path
+async function fetchCatalogPackages(adminSub: string) {
+  const res = await ddb.send(new QueryCommand({
+    TableName: TABLE_NAME,
+    KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
+    ExpressionAttributeValues: { ":pk": { S: adminSub }, ":prefix": { S: "CATALOG#" } },
+  }));
+  return (res.Items || [])
+    .filter(item => (item.status?.S || "ACTIVE") === "ACTIVE")
+    .map(item => {
       const catalogPackageId = (item.sk?.S || "").replace("CATALOG#", "");
       return {
         id: catalogPackageId,
         title: item.name?.S || item.packageType?.S || "Dance Package",
-        description: `Price: ${item.price?.N ?? item.price?.S ?? "Contact for price"} BHD.`
+        description: `Price: ${item.price?.N ?? item.price?.S ?? "Contact for price"} BHD.`,
       };
     });
-  }
 }
 async function fetchPackageById(adminSub: string, packageId: string) {
   const res = await ddb.send(new GetItemCommand({
@@ -129,7 +141,10 @@ async function fetchActiveBroadcastByPackageId(
   adminSub: string,
   packageId: string
 ): Promise<{ validFrom?: string; validUntil?: string } | null> {
-  const today = new Date().toISOString().split("T")[0];
+  // No date filtering — return the broadcast validity window regardless of today's
+  // date. The Admin may have set validFrom/validUntil as informational guidance for
+  // the DatePicker bounds, not as an enforcement gate. The member received a valid
+  // invitation and must be able to complete the flow at any point.
   const res = await ddb.send(new QueryCommand({
     TableName: TABLE_NAME,
     KeyConditionExpression: "pk = :pk AND begins_with(sk, :prefix)",
@@ -140,9 +155,7 @@ async function fetchActiveBroadcastByPackageId(
   }));
   const match = (res.Items || []).find(item => {
     const ref = (item.packageRef?.S || item.packageIntent?.S || "").replace("CATALOG#", "");
-    const vf  = item.validFrom?.S;
-    const vu  = item.validUntil?.S;
-    return ref === packageId && vf && vu && vf <= today && vu >= today;
+    return ref === packageId;
   });
   if (!match) return null;
   return { validFrom: match.validFrom?.S, validUntil: match.validUntil?.S };
