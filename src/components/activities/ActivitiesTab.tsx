@@ -91,6 +91,9 @@ export const ActivitiesTab = () => {
   // ALL bookings in the date range (pending + assigned)
   const [allBookings,        setAllBookings]        = useState<Booking[]>([]);
 
+  // Catalog name lookup: packageId (without CATALOG# prefix) -> human-readable name
+  const [catalogMap,         setCatalogMap]         = useState<Record<string, string>>({});
+
   const [showModal,          setShowModal]          = useState(false);
   const [editingActivity,    setEditingActivity]    = useState<Schedule | null>(null);
   const [isSubmitting,       setIsSubmitting]       = useState(false);
@@ -134,6 +137,21 @@ export const ActivitiesTab = () => {
       )
       .catch(() => setFacilities([]))
       .finally(() => setFacilitiesLoading(false));
+  }, [adminSub]);
+
+  // Fetch catalog package names for display in pending booking cards
+  useEffect(() => {
+    if (!adminSub) return;
+    DatabaseService.queryAllCatalogsRecord(adminSub)
+      .then((rows: any[]) => {
+        const map: Record<string, string> = {};
+        rows.forEach((r: any) => {
+          const id = (r.packageId ?? r.sk ?? '').replace('CATALOG#', '');
+          if (id) map[id] = r.name || r.packageType || id;
+        });
+        setCatalogMap(map);
+      })
+      .catch(() => {/* non-critical — display falls back gracefully */});
   }, [adminSub]);
 
   // Subscribe to schedules
@@ -195,7 +213,8 @@ export const ActivitiesTab = () => {
             name:         r.name        ?? r.memberName  ?? r.displayName ?? '',
             packageId:    r.packageId,
             activityType: (r.activityType && r.activityType.trim())
-                            || (r.packageId && `Package: ${r.packageId}`)
+                            || (r.packageId && catalogMap[r.packageId.replace('CATALOG#', '')])
+                            || (r.packageId ? `Package: ${r.packageId.replace('CATALOG#', '')}` : '')
                             || 'Pending Enrollment',
             scheduleId:   r.scheduleId  ?? '',
             date:         r.date        ?? '',
@@ -643,7 +662,11 @@ export const ActivitiesTab = () => {
                                 borderRadius: '6px', fontSize: '10px', color: '#92400e',
                               }}>
                                 <div style={{ marginBottom: '4px', fontWeight: '700' }}>
-                                  {b.activityType || (b.packageId ? `Package: ${b.packageId}` : 'Pending Enrollment')}
+                                  {b.activityType && !b.activityType.startsWith('Package:')
+                                    ? b.activityType
+                                    : b.packageId
+                                      ? (catalogMap[b.packageId.replace('CATALOG#', '')] || b.packageId.replace('CATALOG#', ''))
+                                      : 'Pending Enrollment'}
                                 </div>
                                 {b.date && (
                                   <div style={{ marginBottom: '2px' }}>
