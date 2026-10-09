@@ -34,6 +34,8 @@ interface Booking {
   name?: string;
   packageId?: string;
   activityType?: string;
+  /** 'broadcast' = came via a campaign; 'catalogue' = direct chat-agent order */
+  orderType?: 'broadcast' | 'catalogue';
   scheduleId?: string;   // present when already assigned
   date?: string;
   startTime?: string;
@@ -211,11 +213,17 @@ export const ActivitiesTab = () => {
             phone:        r.phone       ?? r.memberPhone ?? '',
             memberPhone:  r.memberPhone ?? r.phone       ?? '',
             name:         r.name        ?? r.memberName  ?? r.displayName ?? '',
-            packageId:    r.packageId,
-            activityType: (r.activityType && r.activityType.trim())
-                            || (r.packageId && catalogMap[r.packageId.replace('CATALOG#', '')])
-                            || (r.packageId ? `Package: ${r.packageId.replace('CATALOG#', '')}` : '')
-                            || 'Pending Enrollment',
+            packageId:    r.packageId   ?? '',
+            // Store the raw activityType from the DB (may be empty for flow-booked packages).
+            // Display resolution happens in bookingGroups useMemo (depends on catalogMap)
+            // so it recomputes automatically when the catalog fetch completes.
+            activityType: (r.activityType ?? '').trim(),
+            // Detect order origin: booking records from flow endpoint carry a packageId
+            // but no activityType; engine-assigned bookings carry an activityType.
+            // Broadcast receipts have sk containing BROADCAST# in the booking path.
+            orderType: ((r.packageId && !(r.activityType && r.activityType.trim()))
+              ? 'broadcast'
+              : 'catalogue') as 'broadcast' | 'catalogue',
             scheduleId:   r.scheduleId  ?? '',
             date:         r.date        ?? '',
             startTime:    r.startTime   ?? '',
@@ -232,7 +240,8 @@ export const ActivitiesTab = () => {
     });
 
     return () => subscription.unsubscribe();
-  }, [adminSub, startDate, endDate]);
+  // catalogMap intentionally NOT in deps — see bookingGroups useMemo for display name resolution
+  }, [adminSub, startDate, endDate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Derived maps ──────────────────────────────────────────────────────────
 
@@ -258,16 +267,37 @@ export const ActivitiesTab = () => {
     return map;
   }, [schedules]);
 
-  // Group ALL bookings by activityType
+  // Resolve the human-readable package name from catalogMap.
+  // Runs whenever allBookings OR catalogMap changes — so even if catalogs arrive
+  // after bookings, the groups update automatically with the correct names.
+  const resolveDisplayName = (b: Booking): string => {
+    // 1. activityType from DB (set by scheduling engine after assignment)
+    if (b.activityType && b.activityType.trim()) return b.activityType.trim();
+    // 2. Catalog name lookup via packageId
+    if (b.packageId) {
+      const cleanId = b.packageId.replace('CATALOG#', '');
+      const catalogName = catalogMap[cleanId];
+      if (catalogName) {
+        return b.orderType === 'broadcast'
+          ? `📢 ${catalogName}`   // broadcast campaign package
+          : `📦 ${catalogName}`;  // direct catalogue order
+      }
+      return `Package: ${cleanId}`;
+    }
+    return 'Pending Enrollment';
+  };
+
+  // Group ALL bookings by resolved display name
   const bookingGroups = useMemo((): BookingGroup[] => {
     const map = new Map<string, Booking[]>();
     for (const b of allBookings) {
-      const key = b.activityType || 'Unknown Activity';
+      const key = resolveDisplayName(b);
       if (!map.has(key)) map.set(key, []);
       map.get(key)!.push(b);
     }
     return [...map.entries()].map(([activityType, bookings]) => ({ activityType, bookings }));
-  }, [allBookings]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allBookings, catalogMap]);
 
   const schedulesByDate = useMemo(() => {
     const grouped: Record<string, SchedulesByDate> = {};
@@ -661,12 +691,20 @@ export const ActivitiesTab = () => {
                                 background: '#fffbeb', border: '1px solid #fde68a',
                                 borderRadius: '6px', fontSize: '10px', color: '#92400e',
                               }}>
+                                {/* Order type badge */}
+                                <div style={{ marginBottom: '3px' }}>
+                                  <span style={{
+                                    fontSize: '9px', fontWeight: '700',
+                                    padding: '1px 6px', borderRadius: '4px',
+                                    background: b.orderType === 'broadcast' ? '#dbeafe' : '#fef9c3',
+                                    color:      b.orderType === 'broadcast' ? '#1d4ed8' : '#854d0e',
+                                  }}>
+                                    {b.orderType === 'broadcast' ? '📢 Broadcast Package' : '📦 Catalogue Session'}
+                                  </span>
+                                </div>
+                                {/* Package / session name */}
                                 <div style={{ marginBottom: '4px', fontWeight: '700' }}>
-                                  {b.activityType && !b.activityType.startsWith('Package:')
-                                    ? b.activityType
-                                    : b.packageId
-                                      ? (catalogMap[b.packageId.replace('CATALOG#', '')] || b.packageId.replace('CATALOG#', ''))
-                                      : 'Pending Enrollment'}
+                                  {resolveDisplayName(b).replace(/^[📢📦]\s*/, '')}
                                 </div>
                                 {b.date && (
                                   <div style={{ marginBottom: '2px' }}>
