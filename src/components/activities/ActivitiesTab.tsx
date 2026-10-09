@@ -270,20 +270,27 @@ export const ActivitiesTab = () => {
   // Resolve the human-readable package name from catalogMap.
   // Runs whenever allBookings OR catalogMap changes — so even if catalogs arrive
   // after bookings, the groups update automatically with the correct names.
+  // Generic placeholder strings written by the flow endpoint — not real activity names.
+  const GENERIC_ACTIVITY_LABELS = new Set([
+    'package enrollment', 'pending enrollment', 'pending scheduling', '',
+  ]);
+
   const resolveDisplayName = (b: Booking): string => {
-    // 1. activityType from DB (set by scheduling engine after assignment)
-    if (b.activityType && b.activityType.trim()) return b.activityType.trim();
-    // 2. Catalog name lookup via packageId
+    // 1. Catalog lookup via packageId — highest priority when a packageId exists,
+    //    because the catalog name is always more meaningful than a generic label.
     if (b.packageId) {
       const cleanId = b.packageId.replace('CATALOG#', '');
       const catalogName = catalogMap[cleanId];
-      if (catalogName) {
-        return b.orderType === 'broadcast'
-          ? `📢 ${catalogName}`   // broadcast campaign package
-          : `📦 ${catalogName}`;  // direct catalogue order
-      }
-      return `Package: ${cleanId}`;
+      if (catalogName) return catalogName;
+      // Catalog not yet loaded — fall through to activityType then raw id
     }
+    // 2. Real activityType from DB (written by the scheduling engine after assignment,
+    //    or when the member booked a specific session via chat-agent).
+    //    Skip generic placeholder values the flow endpoint writes.
+    const at = (b.activityType ?? '').trim();
+    if (at && !GENERIC_ACTIVITY_LABELS.has(at.toLowerCase())) return at;
+    // 3. Raw packageId as last resort while catalog is loading
+    if (b.packageId) return b.packageId.replace('CATALOG#', '');
     return 'Pending Enrollment';
   };
 
