@@ -61,7 +61,13 @@
                 "name": "selected_package",
                 "data-source": "${data.packages_list}",
                 "label": "Available Packages (Active Only)",
-                "required": true
+                "required": true,
+                "visible": "${data.packages_list.length > 0}"
+              },
+              {
+                "type": "TextBody",
+                "text": "No packages available at this time. Please contact the studio for assistance.",
+                "visible": "${data.packages_list.length == 0}"
               },
               {
                 "type": "Footer",
@@ -142,7 +148,7 @@
             "children": [
               {
                 "type": "TextBody",
-                "text": "⚠️ ${data.time_error_msg}",
+                "text": "\u26a0\ufe0f ${data.time_error_msg}",
                 "visible": "${data.is_time_error_visible}"
               },
               {
@@ -213,7 +219,7 @@
         },
         "summary": {
           "type": "string",
-          "__example__": "📋 Package: Tango Season\n📅 Date: 2026-10-01\n⏰ Time: 6:00 PM"
+          "__example__": "\ud83d\udccb Package: Tango Season\n\ud83d\udcc5 Date: 2026-10-01\n\u23f0 Time: 6:00 PM"
         }
       },
       "terminal": false,
@@ -255,7 +261,7 @@
         "children": [
           {
             "type": "TextHeading",
-            "text": "🎉 Booking Confirmed!"
+            "text": "\ud83c\udf89 Booking Confirmed!"
           },
           {
             "type": "TextBody",

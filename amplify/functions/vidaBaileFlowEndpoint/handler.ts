@@ -41,16 +41,35 @@ function encryptMetaResponse(responseData: any, aesKey: Buffer, originalIv: Buff
 // ────────────────────────────────────────────────────────────────────────────
 // 2. Multi-Tenant Context Resolver
 // ────────────────────────────────────────────────────────────────────────────
+/**
+ * Decode the flow_token to extract adminSub.
+ *
+ * Token formats (newest first):
+ *   A. Base64url JSON  — { broadcastId, adminSub, recipientPhone, packageIntent }
+ *      Written by vidaBaileProcessOutboundQueue since the NanoID-safe migration.
+ *   B. Legacy sentinel — "..._ADMIN#<adminSub>"  (delimiter-based, kept for
+ *      chat-agent flows that have not been migrated yet)
+ *   C. Plain base64 JSON — { adminSub, phone }  (chat-agent path)
+ */
 function resolveTenantSub(decryptedData: any): string {
-  const token = decryptedData?.flow_token;
-  if (token) {
-    if (token.includes("_ADMIN#")) return token.split("_ADMIN#")[1];
-    try {
-      const decoded = JSON.parse(Buffer.from(token, "base64").toString("utf8"));
-      if (decoded?.adminSub) return decoded.adminSub;
-    } catch { /* Ignore base64 parse errors */ }
-  }
-  // Fallback for Meta Preview Panel & Health Checks (Controlled via Environment)
+  const token: string = decryptedData?.flow_token ?? "";
+
+  // Path A — Base64url JSON (new format, no delimiter collisions)
+  try {
+    const decoded = JSON.parse(Buffer.from(token, "base64url").toString("utf8"));
+    if (decoded?.adminSub) return decoded.adminSub;
+  } catch { /* not base64url JSON */ }
+
+  // Path B — legacy sentinel _ADMIN#<sub>
+  if (token.includes("_ADMIN#")) return token.split("_ADMIN#").pop()!;
+
+  // Path C — plain base64 JSON (chat-agent)
+  try {
+    const decoded = JSON.parse(Buffer.from(token, "base64").toString("utf8"));
+    if (decoded?.adminSub) return decoded.adminSub;
+  } catch { /* not plain base64 JSON */ }
+
+  // Fallback for Meta Preview Panel & Health Checks
   if (process.env.DEFAULT_ADMIN_SUB) {
     console.log(`ℹ️ Using environment-configured default adminSub: ${process.env.DEFAULT_ADMIN_SUB}`);
     return process.env.DEFAULT_ADMIN_SUB;
@@ -58,12 +77,31 @@ function resolveTenantSub(decryptedData: any): string {
   throw new Error("Unauthorized Flow access: Missing tenant context.");
 }
 
+/**
+ * Decode the flow_token to extract broadcastId.
+ *
+ * Mirrors resolveTenantSub format priority:
+ *   A. Base64url JSON  — decoded.broadcastId
+ *   B. Legacy sentinel — "_CAMP#<id>_PHONE#..." pattern
+ */
 function resolveBroadcastId(decryptedData: any): string | null {
-  const token = decryptedData?.flow_token;
+  const token: string = decryptedData?.flow_token ?? "";
   if (!token) return null;
-  // Extract exactly what is after _CAMP# and before the next underscore
-  const campMatch = token.match(/_CAMP#([^_]+)/);
-  return campMatch?.[1] ?? null;
+
+  // Path A — Base64url JSON
+  try {
+    const decoded = JSON.parse(Buffer.from(token, "base64url").toString("utf8"));
+    if (decoded?.broadcastId) return decoded.broadcastId;
+  } catch { /* not base64url JSON */ }
+
+  // Path B — legacy _CAMP#<id>_PHONE# sentinel (id may contain underscores,
+  // so match everything between _CAMP# and _PHONE# instead of stopping at _)
+  const campMatch = token.match(/_CAMP#(.+?)_PHONE#/);
+  if (campMatch?.[1]) return campMatch[1];
+
+  // Fallback — old two-field sentinel without _PHONE# segment
+  const campMatchOld = token.match(/_CAMP#(.+?)_ADMIN#/);
+  return campMatchOld?.[1] ?? null;
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -279,18 +317,31 @@ export const handler = async (event: any) => {
           //    Fallback: UNKNOWN_PHONE (should never be reached in production).
           const rawToken: string = decryptedData?.flow_token ?? "";
 
-          // Path A — broadcast token embeds _PHONE#<number>_ADMIN#
-          const phoneSegmentMatch = rawToken.match(/_PHONE#(.+?)_ADMIN#/);
-          if (phoneSegmentMatch?.[1]) {
-            memberPhone = phoneSegmentMatch[1];
-            console.log(`📱 Phone resolved from broadcast token: ${memberPhone}`);
-          } else {
-            // Path B — chat-agent base64 JSON token
+          // Path A — Base64url JSON (new format, NanoID-safe)
+          try {
+            const decoded = JSON.parse(Buffer.from(rawToken, "base64url").toString("utf8"));
+            if (decoded?.recipientPhone) {
+              memberPhone = decoded.recipientPhone;
+              console.log(`📱 Phone resolved from Base64url token: ${memberPhone}`);
+            }
+          } catch { /* not base64url JSON */ }
+
+          if (memberPhone === "UNKNOWN_PHONE") {
+            // Path B — legacy _PHONE#<number>_ADMIN# sentinel
+            const phoneSegmentMatch = rawToken.match(/_PHONE#(.+?)_ADMIN#/);
+            if (phoneSegmentMatch?.[1]) {
+              memberPhone = phoneSegmentMatch[1];
+              console.log(`📱 Phone resolved from legacy sentinel token: ${memberPhone}`);
+            }
+          }
+
+          if (memberPhone === "UNKNOWN_PHONE") {
+            // Path C — chat-agent plain base64 JSON token
             try {
               const decoded = JSON.parse(Buffer.from(rawToken, "base64").toString("utf8"));
               if (decoded?.phone) {
                 memberPhone = decoded.phone;
-                console.log(`📱 Phone resolved from chat-agent token: ${memberPhone}`);
+                console.log(`📱 Phone resolved from chat-agent base64 token: ${memberPhone}`);
               }
             } catch {
               console.warn("flow_token is not base64 JSON — falling back to UNKNOWN_PHONE");

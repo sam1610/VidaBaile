@@ -103,7 +103,7 @@ export const handler = async (event: any) => {
               name: "flow",
               parameters: {
                 flow_message_version: "3",
-                flow_token:           `BUY_PACKAGE_${packageIntent}_CAMP#${campaignId}_PHONE#${recipientPhone}_ADMIN#${adminSub}`,
+                flow_token:           Buffer.from(JSON.stringify({ broadcastId: campaignId, adminSub, recipientPhone, packageIntent })).toString("base64url"),
                 flow_id:              FLOW_ID,
                 flow_cta:             FLOW_CTA,
                 mode:                 "published",
