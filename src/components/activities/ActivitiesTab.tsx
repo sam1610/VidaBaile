@@ -546,23 +546,19 @@ export const ActivitiesTab = () => {
 
                       return (
                         <div key={b.sk}>
-                          {/* Draggable card */}
+                          {/* Draggable card — clickable for both pending and assigned */}
                           <div
                             draggable
                             onDragStart={() => handleDragStart(b)}
                             onDragEnd={handleDragEnd}
-                            onClick={() => {
-                              if (isAssigned) {
-                                setExpandedBookingSk(isExpanded ? null : b.sk);
-                              }
-                            }}
+                            onClick={() => setExpandedBookingSk(isExpanded ? null : b.sk)}
                             style={{
                               display: 'flex', alignItems: 'center', gap: '7px',
                               padding: '5px 6px',
                               background: '#fff',
-                              border: '1px solid #e2e8f0',
+                              border: `1px solid ${isExpanded ? '#93c5fd' : '#e2e8f0'}`,
                               borderRadius: '6px',
-                              cursor: isAssigned ? 'pointer' : 'grab',
+                              cursor: 'pointer',
                               opacity: isAssigned ? 0.5 : 1,
                               transition: 'opacity 0.15s, border-color 0.15s',
                               userSelect: 'none',
@@ -596,47 +592,79 @@ export const ActivitiesTab = () => {
                             )}
                           </div>
 
-                          {/* Inline assignment detail (click to expand) */}
-                          {isAssigned && isExpanded && (
-                            <div style={{
-                              marginTop: '2px', padding: '6px 8px',
-                              background: '#f0fdf4', border: '1px solid #bbf7d0',
-                              borderRadius: '6px', fontSize: '10px', color: '#166534',
-                            }}>
-                              {assignedSched ? (
-                                <>
-                                  {/* Class name — single column */}
-                                  <div style={{ marginBottom: '3px' }}>
-                                    <strong>Class:</strong> {assignedSched.activityType}
-                                  </div>
+                          {/* Inline detail panel (click to expand for both states) */}
+                          {isExpanded && (
+                            isAssigned ? (
+                              /* ── ASSIGNED STATE: two-column comparison ── */
+                              <div style={{
+                                marginTop: '2px', padding: '6px 8px',
+                                background: '#f0fdf4', border: '1px solid #bbf7d0',
+                                borderRadius: '6px', fontSize: '10px', color: '#166534',
+                              }}>
+                                {assignedSched ? (
+                                  <>
+                                    {/* Class name — full width */}
+                                    <div style={{ marginBottom: '4px', fontWeight: '700' }}>
+                                      {assignedSched.activityType}
+                                    </div>
 
-                                  {/* Date row — assigned on left, member-selected on right */}
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px', marginBottom: '2px' }}>
-                                    <span><strong>Date:</strong> {assignedSched.date}</span>
-                                    {b.date && b.date !== assignedSched.date && (
-                                      <span style={{ fontSize: '9px', color: '#3b82f6', whiteSpace: 'nowrap' }}>
-                                        Selected: {b.date}
-                                      </span>
-                                    )}
-                                  </div>
+                                    {/* Date row: assigned left, customer-selected right */}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px', marginBottom: '2px' }}>
+                                      <span><strong>Date:</strong> {assignedSched.date}</span>
+                                      {b.date && (
+                                        <span style={{ fontSize: '9px', color: '#3b82f6', whiteSpace: 'nowrap' }}>
+                                          Selected: {b.date}
+                                        </span>
+                                      )}
+                                    </div>
 
-                                  {/* Time row — assigned on left, member-selected on right */}
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px' }}>
-                                    <span><strong>Time:</strong> {assignedSched.startTime} - {assignedSched.endTime}</span>
-                                    {b.startTime && b.startTime !== assignedSched.startTime && (
-                                      <span style={{ fontSize: '9px', color: '#3b82f6', whiteSpace: 'nowrap' }}>
-                                        Selected: {b.startTime}
-                                      </span>
-                                    )}
-                                  </div>
-                                </>
-                              ) : (
-                                <div>Schedule ID: {b.scheduleId}</div>
-                              )}
-                              <div style={{ marginTop: '4px', fontSize: '9px', color: '#64748b', fontStyle: 'italic' }}>
-                                Drag to a different row to reassign
+                                    {/* Time row: assigned left, customer-selected right */}
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', gap: '6px' }}>
+                                      <span><strong>Time:</strong> {assignedSched.startTime} - {assignedSched.endTime}</span>
+                                      {b.startTime && (
+                                        <span style={{ fontSize: '9px', color: '#3b82f6', whiteSpace: 'nowrap' }}>
+                                          Selected: {b.startTime}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </>
+                                ) : (
+                                  <div style={{ color: '#64748b' }}>Schedule ID: {b.scheduleId}</div>
+                                )}
+                                <div style={{ marginTop: '4px', fontSize: '9px', color: '#64748b', fontStyle: 'italic' }}>
+                                  Drag to a different row to reassign
+                                </div>
                               </div>
-                            </div>
+                            ) : (
+                              /* ── PENDING STATE: show customer's original request ── */
+                              <div style={{
+                                marginTop: '2px', padding: '6px 8px',
+                                background: '#fffbeb', border: '1px solid #fde68a',
+                                borderRadius: '6px', fontSize: '10px', color: '#92400e',
+                              }}>
+                                <div style={{ marginBottom: '4px', fontWeight: '700' }}>
+                                  {b.activityType || (b.packageId ? `Package: ${b.packageId}` : 'Pending Enrollment')}
+                                </div>
+                                {b.date && (
+                                  <div style={{ marginBottom: '2px' }}>
+                                    <strong>Requested Date:</strong> {b.date}
+                                  </div>
+                                )}
+                                {b.startTime && (
+                                  <div>
+                                    <strong>Requested Time:</strong> {b.startTime}
+                                  </div>
+                                )}
+                                {!b.date && !b.startTime && (
+                                  <div style={{ color: '#b45309', fontStyle: 'italic' }}>
+                                    No date/time requested yet
+                                  </div>
+                                )}
+                                <div style={{ marginTop: '4px', fontSize: '9px', color: '#92400e', fontStyle: 'italic' }}>
+                                  Drag onto a class row to assign
+                                </div>
+                              </div>
+                            )
                           )}
                         </div>
                       );
