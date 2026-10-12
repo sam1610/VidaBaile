@@ -124,7 +124,7 @@ export const POSPackagesTab = () => {
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px' }}>
           <KPIBox
             title="Total Revenue"
-            value={`$${kpis.totalRevenue}`}
+            value={`BD ${kpis.totalRevenue}`}
             unit="Template Value"
             trend="up"
             color="success"

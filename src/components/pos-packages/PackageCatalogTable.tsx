@@ -56,7 +56,7 @@ export function PackageCatalogTable({
                 )}
               </td>
               <td style={{ whiteSpace: 'nowrap', fontWeight: '600', color: '#27ae60' }}>
-                ${catalog.price.toFixed(2)}
+                BD ${catalog.price.toFixed(2)}
               </td>
               <td style={{ textAlign: 'center', whiteSpace: 'nowrap', fontWeight: '600', color: '#2e3b50' }}>
                 {catalog.totalCredits}
