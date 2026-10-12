@@ -5,7 +5,7 @@ import { Rule, Schedule } from 'aws-cdk-lib/aws-events';
 import { LambdaFunction as EventsLambdaTarget } from 'aws-cdk-lib/aws-events-targets';
 import { SqsEventSource } from 'aws-cdk-lib/aws-lambda-event-sources';
 import { Queue } from 'aws-cdk-lib/aws-sqs';
-import { Fn } from 'aws-cdk-lib';
+import { Fn , Duration } from 'aws-cdk-lib';
 import { auth } from './auth/resource';
 import { data } from './data/resource';
 import { vidaBaileWhatsapp } from './functions/vidaBaileWhatsapp/resource';
@@ -72,12 +72,15 @@ const bedrockNovaMicroArn = Fn.sub(
 );
 
 // SQS Queue ARNs (preserved from existing topology)
-const inboundChatQueueArn = Fn.sub(
-  'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:inbound-chat-queue'
-);
-const outboundBroadcastQueueArn = Fn.sub(
-  'arn:aws:sqs:${AWS::Region}:${AWS::AccountId}:outbound-broadcast-queue'
-);
+const inboundQueue = new Queue(backend.stack, 'InboundChatQueue', {
+  visibilityTimeout: Duration.seconds(90),
+});
+const outboundQueue = new Queue(backend.stack, 'OutboundBroadcastQueue', {
+  visibilityTimeout: Duration.seconds(120),
+});
+
+const inboundChatQueueArn = inboundQueue.queueArn;
+const outboundBroadcastQueueArn = outboundQueue.queueArn;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // SECTION A: AppSync Tool Functions (DynamoDB ClubRecord table)
@@ -142,7 +145,7 @@ backend.vidaBaileWhatsapp.resources.lambda.addToRolePolicy(
 );
 (backend.vidaBaileWhatsapp.resources.lambda as LambdaFunction).addEnvironment(
   'INBOUND_CHAT_QUEUE_URL',
-  Fn.sub('https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/inbound-chat-queue')
+  inboundQueue.queueUrl
 );
 
 // ── B.2 vidaBaileChatAgent: DynamoDB (ClubRecord) + SQS Receive + Bedrock ──────
@@ -252,7 +255,7 @@ backend.vidaBaileDispatchBroadcast.resources.lambda.addToRolePolicy(
 );
 (backend.vidaBaileDispatchBroadcast.resources.lambda as LambdaFunction).addEnvironment(
   'OUTBOUND_QUEUE_URL',
-  Fn.sub('https://sqs.${AWS::Region}.amazonaws.com/${AWS::AccountId}/outbound-broadcast-queue')
+  outboundQueue.queueUrl
 );
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -260,12 +263,6 @@ backend.vidaBaileDispatchBroadcast.resources.lambda.addToRolePolicy(
 // ─────────────────────────────────────────────────────────────────────────────
 
 // ── C.1 inbound-chat-queue → vidaBaileChatAgent (batchSize=1) ─────────────────
-const inboundQueue = Queue.fromQueueArn(
-  backend.stack,
-  'InboundChatQueueRef',
-  inboundChatQueueArn.toString()
-);
-
 (backend.vidaBaileChatAgent.resources.lambda as LambdaFunction).addEventSource(
   new SqsEventSource(inboundQueue, {
     batchSize: 1,
@@ -273,12 +270,6 @@ const inboundQueue = Queue.fromQueueArn(
 );
 
 // ── C.2 outbound-broadcast-queue → vidaBaileProcessOutboundQueue (batchSize=10)
-const outboundQueue = Queue.fromQueueArn(
-  backend.stack,
-  'OutboundBroadcastQueueRef',
-  outboundBroadcastQueueArn.toString()
-);
-
 (backend.vidaBaileProcessOutboundQueue.resources.lambda as LambdaFunction).addEventSource(
   new SqsEventSource(outboundQueue, {
     batchSize: 10,
