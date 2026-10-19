@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState, Fragment } from 'react';
 import { generateClient } from 'aws-amplify/data';
 import type { Schema } from '../../../amplify/data/resource';
 import { useAdminSub } from '../../hooks';
+import { useUserRole } from '../../context/UserRoleContext';
 import DatabaseService from '../../services/DatabaseService';
 import { ActivityCrudModal } from './ActivityCrudModal';
 import './ActivitiesTab.css';
@@ -73,6 +74,7 @@ function avatarColor(b: Booking): string {
 
 export const ActivitiesTab = () => {
   const { adminSub, loading: adminLoading } = useAdminSub();
+  const { userRole, coachId } = useUserRole();
 
   const [startDate, setStartDate] = useState<string>(
     getMonday(new Date()).toISOString().split('T')[0]
@@ -165,7 +167,12 @@ export const ActivitiesTab = () => {
       (data: any[]) => {
         setSchedules(
           data
-            .filter((item) => item.entityType === 'SCHEDULE' && item.sk?.startsWith('SCHEDULE#'))
+            .filter((item) => {
+              if (item.entityType !== 'SCHEDULE' || !item.sk?.startsWith('SCHEDULE#')) return false;
+              // Coach role: only show schedules assigned to this coach
+              if (userRole === 'coach' && item.coachPhone !== coachId) return false;
+              return true;
+            })
             .map((item) => ({
               scheduleId:       item.scheduleId || item.sk.replace(/^SCHEDULE#/, ''),
               date:             item.date,

@@ -229,16 +229,18 @@ export const handler = async (event: any) => {
 
     const displayPhone = value.metadata?.display_phone_number ?? "";
 
-    if (value.statuses) {
+    // Status updates (delivered / read receipts) — update DynamoDB and return
+    // immediately. Never enqueue to SQS: these carry no user message text and
+    // would trigger the Bedrock agent on an empty prompt.
+    if (value.statuses && !value.messages) {
       const status = value.statuses[0];
       const wamid = status.id;
-      const newStatus = status.status; 
+      const newStatus = status.status;
 
-      console.log(`📍 Status: WAMID ${wamid} →${newStatus}`);
+      console.log(`📍 Status update only: WAMID ${wamid} → ${newStatus} (not enqueuing to SQS)`);
 
       const receipt = await findBroadcastReceiptByWamid(wamid);
       if (receipt) {
-        // FIXED: Record
         const updates: Record<string, any> = {};
         if (newStatus === "read") {
           updates.readAt = new Date().toISOString();
@@ -248,6 +250,25 @@ export const handler = async (event: any) => {
       } else {
         console.log(`ℹ️ No receipt found for WAMID: ${wamid} (likely non-broadcast message)`);
       }
+
+      // Return immediately — do NOT fall through to the messages block.
+      return { statusCode: 200, body: "OK" };
+    }
+
+    // Handle a payload that contains both statuses and messages (Meta batching).
+    // Process the status receipt first, then continue to enqueue the message.
+    if (value.statuses && value.messages) {
+      const status = value.statuses[0];
+      const wamid = status.id;
+      const newStatus = status.status;
+      console.log(`📍 Batched status+message: updating receipt for WAMID ${wamid} → ${newStatus}`);
+      const receipt = await findBroadcastReceiptByWamid(wamid);
+      if (receipt) {
+        const updates: Record<string, any> = {};
+        if (newStatus === "read") { updates.readAt = new Date().toISOString(); updates.isRead = true; }
+        await updateBroadcastReceiptStatus(receipt.adminSub, receipt.sk, newStatus, updates);
+      }
+      // Fall through to messages block below to enqueue the actual user message.
     }
 
     if (value.messages) {

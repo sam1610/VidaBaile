@@ -4,6 +4,7 @@ import type { Schema } from '../../hooks/useAppSync';
 import { Badge } from '../home/components/Badge';
 import { CoachCrudModal } from './CoachCrudModal';
 import { useAdminSub } from '../../hooks';
+import { useUserRole } from '../../context/UserRoleContext';
 import { isCoach, createCoach, type Coach } from '../../lib/models';
 import { observeCoaches } from '../../services/DatabaseService';
 import './AppointmentsTab.css';
@@ -26,6 +27,7 @@ import './AppointmentsTab.css';
 export const AppointmentsTab = () => {
   // Fetch admin's Cognito SUB (partition key) with auth guard
   const { adminSub, loading: adminLoading, error: adminError } = useAdminSub();
+  const { userRole, coachId } = useUserRole();
 
   // State for coaches data
   const [coaches, setCoaches] = useState<Coach[]>([]);
@@ -61,9 +63,11 @@ export const AppointmentsTab = () => {
       console.log('[AppointmentsTab] Received coach data:', data.length, 'items');
       
       // Filter by entityType and sort by name
-      const filtered = data.filter(isCoach).sort((a, b) => 
-        (a.name || '').localeCompare(b.name || '')
-      );
+      const filtered = data
+        .filter(isCoach)
+        // Coach role: only show the record for this logged-in coach
+        .filter((c) => userRole !== 'coach' || c.phone === coachId)
+        .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
       
       setCoaches(filtered);
       setLoading(false);
