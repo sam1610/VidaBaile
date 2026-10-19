@@ -2548,22 +2548,42 @@ export async function updateProfileRecord(
     const client = generateClient<Schema>();
     const now = new Date().toISOString();
 
-    // 1. Check whether the PROFILE record already exists.
-    const { data: existing } = await (client.models as any).ClubRecord.get({
-      pk: adminSub,
-      sk: 'PROFILE',
+    // 1. Check whether the PROFILE record already exists using a safe list filter.
+    const { data: existingRecords, errors: listErrors } = await (client.models as any).ClubRecord.list({
+      filter: {
+        and: [
+          { pk: { eq: adminSub } },
+          { sk: { eq: 'PROFILE' } }
+        ]
+      }
     });
 
+    if (listErrors?.length) {
+      throw new Error(listErrors[0].message);
+    }
+
+    const existing = existingRecords && existingRecords.length > 0 ? existingRecords[0] : null;
+
     if (existing) {
-      // 2a. Record exists — use update (preserves createdAt and other fields).
-      const { errors } = await (client.models as any).ClubRecord.update({
-        pk:          adminSub,
-        sk:          'PROFILE',
-        entityType:  'PROFILE',
-        name:        profile.clubName,
-        description: profile.logoBase64,  // Base64 logo stored in description field
-        updatedAt:   now,
-      });
+      // 2a. Record exists — use update. 
+      // We pass the unique 'id' fetched from the list query to ensure the GraphQL mutation succeeds.
+      const updatePayload = existing.id 
+        ? { 
+            id: existing.id, 
+            name: profile.clubName, 
+            description: profile.logoBase64, 
+            updatedAt: now 
+          }
+        : { 
+            pk: adminSub, 
+            sk: 'PROFILE', 
+            name: profile.clubName, 
+            description: profile.logoBase64, 
+            updatedAt: now 
+          };
+
+      const { errors } = await (client.models as any).ClubRecord.update(updatePayload);
+
       if (errors?.length) {
         throw new Error(errors[0]?.message ?? 'Failed to update profile');
       }
