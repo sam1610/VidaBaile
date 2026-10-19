@@ -2546,7 +2546,6 @@ export async function updateProfileRecord(
 ): Promise<void> {
   try {
     const client = generateClient<Schema>();
-    const now = new Date().toISOString();
 
     // 1. Check whether the PROFILE record already exists using a safe list filter.
     const { data: existingRecords, errors: listErrors } = await (client.models as any).ClubRecord.list({
@@ -2566,20 +2565,18 @@ export async function updateProfileRecord(
 
     if (existing) {
       // 2a. Record exists — use update. 
-      // We pass the unique 'id' fetched from the list query to ensure the GraphQL mutation succeeds.
+      // We omit updatedAt; AppSync handles it automatically.
       const updatePayload = existing.id 
         ? { 
             id: existing.id, 
             name: profile.clubName, 
-            description: profile.logoBase64, 
-            updatedAt: now 
+            description: profile.logoBase64
           }
         : { 
             pk: adminSub, 
             sk: 'PROFILE', 
             name: profile.clubName, 
-            description: profile.logoBase64, 
-            updatedAt: now 
+            description: profile.logoBase64
           };
 
       const { errors } = await (client.models as any).ClubRecord.update(updatePayload);
@@ -2590,6 +2587,7 @@ export async function updateProfileRecord(
       console.log('[DB Service] updateProfileRecord: updated existing record');
     } else {
       // 2b. Record does not exist — create it unconditionally.
+      // We omit createdAt and updatedAt; AppSync handles them automatically.
       const { errors } = await (client.models as any).ClubRecord.create({
         pk:          adminSub,
         sk:          'PROFILE',
@@ -2597,10 +2595,9 @@ export async function updateProfileRecord(
         gsi1pk:      `${adminSub}#SETTINGS`,
         gsi1sk:      'PROFILE',
         name:        profile.clubName     ?? 'My Dance Studio',
-        description: profile.logoBase64   ?? '',
-        createdAt:   now,
-        updatedAt:   now,
+        description: profile.logoBase64   ?? ''
       });
+      
       if (errors?.length) {
         throw new Error(errors[0]?.message ?? 'Failed to create profile');
       }
