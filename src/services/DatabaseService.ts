@@ -2530,8 +2530,15 @@ export async function getProfileRecord(adminSub: string): Promise<StudioProfile>
 }
 
 /**
- * Create or overwrite the studio PROFILE record.
- * Uses update-or-create semantics (UpdateItemCommand upsert).
+ * Upsert the studio PROFILE record.
+ *
+ * Amplify Gen 2's .update() maps to a conditional DynamoDB UpdateItem that
+ * requires the item to already exist (attribute_exists(pk)). For a brand-new
+ * admin account the PROFILE record is absent, causing a "conditional request
+ * failed" 400 error.
+ *
+ * Fix: check for the record first, then branch to .create() or .update()
+ * accordingly — a true upsert that works for both new and existing admins.
  */
 export async function updateProfileRecord(
   adminSub: string,
@@ -2539,18 +2546,46 @@ export async function updateProfileRecord(
 ): Promise<void> {
   try {
     const client = generateClient<Schema>();
-    const { errors } = await (client.models as any).ClubRecord.update({
-      pk:          adminSub,
-      sk:          'PROFILE',
-      entityType:  'PROFILE',
-      name:        profile.clubName,
-      description: profile.logoBase64,  // Base64 logo stored in description field
-      updatedAt:   new Date().toISOString(),
+    const now = new Date().toISOString();
+
+    // 1. Check whether the PROFILE record already exists.
+    const { data: existing } = await (client.models as any).ClubRecord.get({
+      pk: adminSub,
+      sk: 'PROFILE',
     });
-    if (errors?.length) {
-      throw new Error(errors[0]?.message ?? 'Failed to update profile');
+
+    if (existing) {
+      // 2a. Record exists — use update (preserves createdAt and other fields).
+      const { errors } = await (client.models as any).ClubRecord.update({
+        pk:          adminSub,
+        sk:          'PROFILE',
+        entityType:  'PROFILE',
+        name:        profile.clubName,
+        description: profile.logoBase64,  // Base64 logo stored in description field
+        updatedAt:   now,
+      });
+      if (errors?.length) {
+        throw new Error(errors[0]?.message ?? 'Failed to update profile');
+      }
+      console.log('[DB Service] updateProfileRecord: updated existing record');
+    } else {
+      // 2b. Record does not exist — create it unconditionally.
+      const { errors } = await (client.models as any).ClubRecord.create({
+        pk:          adminSub,
+        sk:          'PROFILE',
+        entityType:  'PROFILE',
+        gsi1pk:      `${adminSub}#SETTINGS`,
+        gsi1sk:      'PROFILE',
+        name:        profile.clubName     ?? 'My Dance Studio',
+        description: profile.logoBase64   ?? '',
+        createdAt:   now,
+        updatedAt:   now,
+      });
+      if (errors?.length) {
+        throw new Error(errors[0]?.message ?? 'Failed to create profile');
+      }
+      console.log('[DB Service] updateProfileRecord: created new record');
     }
-    console.log('[DB Service] updateProfileRecord: saved successfully');
   } catch (err) {
     console.error('[DB Service] updateProfileRecord failed:', err);
     throw err;
