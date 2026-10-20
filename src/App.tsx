@@ -61,12 +61,14 @@ function AuthenticatedShell({
 
     async function resolveIdentity() {
       try {
-        // forceRefresh: true — same as reference project — guarantees the
-        // access token carries the latest Cognito group assignments.
         const session = await fetchAuthSession({ forceRefresh: true });
-        const payload = session.tokens?.accessToken?.payload;
-        const groups  = (payload?.['cognito:groups'] as string[] | undefined) ?? [];
-        const sub     = (payload?.['sub'] as string | undefined) ?? '';
+        
+        // 1. Extract from BOTH the access token and the ID token
+        const accessPayload = session.tokens?.accessToken?.payload;
+        const idPayload = session.tokens?.idToken?.payload;
+        
+        const groups  = (accessPayload?.['cognito:groups'] as string[] | undefined) ?? [];
+        const sub     = (accessPayload?.['sub'] as string | undefined) ?? '';
 
         console.log('[AuthenticatedShell] cognito:groups =', groups, '| sub =', sub);
 
@@ -80,25 +82,17 @@ function AuthenticatedShell({
           return;
         }
 
-        // Coach: locate the admin's PROFILE to get the partition key (pk).
-        // The PROFILE record's pk is always the admin's sub.
-        let resolvedAdminSub = '';
-        try {
-          const { data: records } = await client.models.ClubRecord.list({
-            filter: { sk: { eq: 'PROFILE' }, entityType: { eq: 'PROFILE' } },
-          });
-          resolvedAdminSub = records?.[0]?.pk ?? '';
-          if (resolvedAdminSub) {
-            console.log('[AuthenticatedShell] role=coach | adminSub resolved:', resolvedAdminSub);
-          } else {
-            console.warn('[AuthenticatedShell] Coach login: PROFILE record not found');
-          }
-        } catch (lookupErr) {
-          console.warn('[AuthenticatedShell] Coach PROFILE lookup failed:', lookupErr);
+        // 2. Coach: Extract the Admin's sub directly from the Cognito ID Token
+        const linkedAdminSub = (idPayload?.['custom:adminSub'] as string) || '';
+
+        if (linkedAdminSub) {
+          console.log('[AuthenticatedShell] role=coach | adminSub resolved from token:', linkedAdminSub);
+        } else {
+          console.error('[AuthenticatedShell] Coach login: Missing custom:adminSub attribute in Cognito!');
         }
 
         if (isMounted) {
-          setIdentity({ userRole: 'coach', coachId: sub, adminSub: resolvedAdminSub });
+          setIdentity({ userRole: 'coach', coachId: sub, adminSub: linkedAdminSub });
           setResolved(true);
         }
       } catch (err) {
