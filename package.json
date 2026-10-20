@@ -15,8 +15,8 @@
     "test:coverage": "vitest --run --coverage --config vitest.config.ts"
   },
   "dependencies": {
-    "@aws-amplify/ui-react": "^6.15.6",
-    "aws-amplify": "^6.20.0",
+    "@aws-amplify/ui-react": "^6.15.7",
+    "aws-amplify": "^6.22.2",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
