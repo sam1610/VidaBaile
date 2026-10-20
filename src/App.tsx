@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, createContext, useContext } from 'react';
 import { Authenticator, Alert, View } from '@aws-amplify/ui-react';
 import { Hub } from 'aws-amplify/utils';
 import { signOut, getCurrentUser, fetchAuthSession } from 'aws-amplify/auth';
@@ -9,8 +9,6 @@ import { UserRoleContext, type UserRole } from './context/UserRoleContext';
 import '@aws-amplify/ui-react/styles.css';
 
 // ── Permissions-error context ─────────────────────────────────────────────────
-import { createContext, useContext } from 'react';
-
 interface PermissionsErrorContextValue {
   reportPermissionsError: () => void;
   clearPermissionsError:  () => void;
@@ -30,10 +28,6 @@ export function usePermissionsError(): PermissionsErrorContextValue {
 const client = generateClient<Schema>();
 
 // ── Profile Initializer ───────────────────────────────────────────────────────
-/**
- * Runs once after sign-in.  For admins it guarantees a PROFILE record exists.
- * For coaches the PROFILE is owned by the admin so we skip creation entirely.
- */
 interface ProfileInitializerProps {
   children: React.ReactNode;
   userRole: UserRole;
@@ -47,7 +41,6 @@ function ProfileInitializer({ children, userRole }: ProfileInitializerProps) {
 
     async function initializeProfile() {
       try {
-        // Coaches don't own a PROFILE record — nothing to initialise.
         if (userRole === 'coach') {
           if (isMounted) setIsProfileReady(true);
           return;
@@ -74,7 +67,7 @@ function ProfileInitializer({ children, userRole }: ProfileInitializerProps) {
         if (isMounted) setIsProfileReady(true);
       } catch (error) {
         console.error('[ProfileInitializer] Error:', error);
-        if (isMounted) setIsProfileReady(true); // Don't block the app
+        if (isMounted) setIsProfileReady(true); 
       }
     }
 
@@ -98,23 +91,15 @@ function App(): React.ReactElement {
   const [showPermissionsError, setShowPermissionsError] = useState<boolean>(false);
   const signOutTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // ── Role + identity resolved from the Cognito access token ────────────────
   const [userRole,  setUserRole]  = useState<UserRole>('admin');
   const [coachId,   setCoachId]   = useState<string>('');
-  /**
-   * adminSub is always the DancingClubData partition owner.
-   * - For admins  : equals their own Cognito sub.
-   * - For coaches : the admin's sub, resolved by finding the single PROFILE
-   *   record in the table (entityType = 'PROFILE', sk = 'PROFILE') and reading
-   *   its pk.  This guarantees every service call uses the right partition key
-   *   so studio branding and all data queries work for coach logins too.
-   */
   const [adminSub,  setAdminSub]  = useState<string>('');
 
   useEffect(() => {
     async function resolveRole() {
       try {
-        const session = await fetchAuthSession();
+        // FORCE REFRESH: Ensures the app gets the newly assigned "coach" group from Cognito
+        const session = await fetchAuthSession({ forceRefresh: true }); 
         const payload = session.tokens?.accessToken?.payload;
         const groups  = (payload?.['cognito:groups'] as string[] | undefined) ?? [];
         const sub     = (payload?.['sub'] as string | undefined) ?? '';
@@ -124,12 +109,9 @@ function App(): React.ReactElement {
         setCoachId(sub);
 
         if (role === 'admin') {
-          // Admin owns the partition — their sub is the adminSub.
           setAdminSub(sub);
           console.log('[App] role=admin | adminSub:', sub);
         } else {
-          // Coach: find the PROFILE record (there is exactly one per club) and
-          // extract its pk which is the admin's sub.
           try {
             const { data: records } = await client.models.ClubRecord.list({
               filter: { sk: { eq: 'PROFILE' }, entityType: { eq: 'PROFILE' } },
@@ -152,7 +134,6 @@ function App(): React.ReactElement {
     resolveRole();
   }, []);
 
-  // ── Token-refresh failure → sign out within 5 s ────────────────────────────
   useEffect(() => {
     const stopListening = Hub.listen('auth', ({ payload }) => {
       if (payload.event === 'tokenRefresh_failure') {
@@ -176,13 +157,11 @@ function App(): React.ReactElement {
     };
   }, []);
 
-  // ── Context values ─────────────────────────────────────────────────────────
   const permissionsErrorContextValue: PermissionsErrorContextValue = {
     reportPermissionsError: () => setShowPermissionsError(true),
     clearPermissionsError:  () => setShowPermissionsError(false),
   };
 
-  // ── Render ─────────────────────────────────────────────────────────────────
   return (
     <PermissionsErrorContext.Provider value={permissionsErrorContextValue}>
       <UserRoleContext.Provider value={{ userRole, coachId, adminSub }}>
