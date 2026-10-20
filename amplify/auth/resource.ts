@@ -4,7 +4,13 @@ export const auth = defineAuth({
   loginWith: {
     email: true,
   },
-  groups: ['Admins'],
-  // passwordPolicy is applied via CDK escape hatch in backend.ts
-  // because defineAuth does not expose a passwordPolicy prop in this version
+  groups: ['admin', 'coach'],
+  userAttributes: {
+    // Define the custom attribute to link coaches to their admin
+    'custom:adminSub': {
+      dataType: 'String',
+      mutable: true,
+      maxLen: 50,
+    },
+  },
 });
