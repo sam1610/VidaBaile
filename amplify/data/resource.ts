@@ -264,6 +264,7 @@ const schema = a.schema({
     ])
     .authorization((allow) => [
       allow.groups(['Admins']),
+      allow.groups(['coach']).to(['read', 'update']),
     ]),
   /**
    * generateTimetable
