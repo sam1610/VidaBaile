@@ -1,20 +1,26 @@
 version: 1
 backend:
   phases:
+    preBuild:
+      commands:
+        # 1. Force wipe the corrupted cache and lockfiles
+        - npm cache clean --force
+        - rm -rf node_modules package-lock.json .npm
+        # 2. Re-align the backend compiler dependencies
+        - npm install --save-dev @aws-amplify/backend @aws-amplify/backend-cli aws-cdk aws-cdk-lib
+        - npm install
     build:
       commands:
-        - npm install
-        - npx ampx pipeline-deploy --branch $AWS_BRANCH --app-id $AWS_APP_ID
+        - npx ampx pipeline-deploy --branch main --app-id d1pmiq0zt0m85e
 frontend:
   phases:
-    build:
+    preBuild:
       commands:
         - npm install
+    build:
+      commands:
         - npm run build
   artifacts:
     baseDirectory: dist
     files:
       - '**/*'
-  cache:
-    paths:
-      - node_modules/**/*
