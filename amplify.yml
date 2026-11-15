@@ -3,12 +3,14 @@ backend:
   phases:
     preBuild:
       commands:
-        # 1. Force wipe the corrupted cache and lockfiles
+        # 1. Force the build server to use Node 20 LTS
+        - nvm install 20
+        - nvm use 20
+        # 2. Clean cache and lockfiles
         - npm cache clean --force
         - rm -rf node_modules package-lock.json .npm
-        # 2. Re-align the backend compiler dependencies
-        - npm install --save-dev @aws-amplify/backend @aws-amplify/backend-cli aws-cdk aws-cdk-lib
-        - npm install
+        # 3. Install with legacy peer resolution to prevent hidden package drops
+        - npm install --legacy-peer-deps
     build:
       commands:
         - npx ampx pipeline-deploy --branch main --app-id d1pmiq0zt0m85e
@@ -16,7 +18,8 @@ frontend:
   phases:
     preBuild:
       commands:
-        - npm install
+        - nvm use 20
+        - npm install --legacy-peer-deps
     build:
       commands:
         - npm run build
