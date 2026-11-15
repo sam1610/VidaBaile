@@ -3,10 +3,10 @@
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 const amplifyOutputs: any = {
   "auth": {
-    "user_pool_id": "us-east-1_iqEjRFnL4",
+    "user_pool_id": "us-east-1_CP5uXuHm8",
     "aws_region": "us-east-1",
-    "user_pool_client_id": "s2dn5bekroma1se3ossokgtop",
-    "identity_pool_id": "us-east-1:6df53c6f-125f-47e7-aa7e-f247e3c91a34",
+    "user_pool_client_id": "2q3inpqe1mkf70brl6bd90oise",
+    "identity_pool_id": "us-east-1:ef355ac2-bfff-4b26-9d4b-c349479602b4",
     "mfa_methods": [],
     "standard_required_attributes": [
       "email"
@@ -22,6 +22,11 @@ const amplifyOutputs: any = {
         "Admins": {
           "precedence": 0
         }
+      },
+      {
+        "coach": {
+          "precedence": 1
+        }
       }
     ],
     "mfa_configuration": "NONE",
@@ -35,7 +40,7 @@ const amplifyOutputs: any = {
     "unauthenticated_identities_enabled": true
   },
   "data": {
-    "url": "https://6igfjquy2rdcznfmtiasjl2ina.appsync-api.us-east-1.amazonaws.com/graphql",
+    "url": "https://glxfvrwxjfbb5o6qygzihfjjgi.appsync-api.us-east-1.amazonaws.com/graphql",
     "aws_region": "us-east-1",
     "default_authorization_type": "AMAZON_COGNITO_USER_POOLS",
     "authorization_types": [
@@ -139,6 +144,14 @@ const amplifyOutputs: any = {
               "type": "String",
               "isRequired": false,
               "attributes": []
+            },
+            "authorizedPackages": {
+              "name": "authorizedPackages",
+              "isArray": true,
+              "type": "String",
+              "isRequired": false,
+              "attributes": [],
+              "isArrayNullable": true
             },
             "bio": {
               "name": "bio",
@@ -506,6 +519,18 @@ const amplifyOutputs: any = {
                       "delete",
                       "read"
                     ]
+                  },
+                  {
+                    "groupClaim": "cognito:groups",
+                    "provider": "userPools",
+                    "allow": "groups",
+                    "operations": [
+                      "read",
+                      "update"
+                    ],
+                    "groups": [
+                      "coach"
+                    ]
                   }
                 ]
               }
@@ -554,13 +579,63 @@ const amplifyOutputs: any = {
               "isRequired": true
             }
           }
+        },
+        "dispatchBroadcast": {
+          "name": "dispatchBroadcast",
+          "isArray": false,
+          "type": "AWSJSON",
+          "isRequired": false,
+          "arguments": {
+            "adminSub": {
+              "name": "adminSub",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "templateName": {
+              "name": "templateName",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "broadcastType": {
+              "name": "broadcastType",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "promotionalContent": {
+              "name": "promotionalContent",
+              "isArray": false,
+              "type": "String",
+              "isRequired": true
+            },
+            "targetingOptions": {
+              "name": "targetingOptions",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            },
+            "packageIntent": {
+              "name": "packageIntent",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            },
+            "campaignId": {
+              "name": "campaignId",
+              "isArray": false,
+              "type": "String",
+              "isRequired": false
+            }
+          }
         }
       }
     }
   },
   "version": "1.5",
   "custom": {
-    "VidaBaileFlowUrl": "https://kqoqpaczj6suso5xymufp5b6la0toirc.lambda-url.us-east-1.on.aws/"
+    "VidaBaileFlowUrl": "https://jrq4tiwdfuywjjfgogsvsqebcy0ivmfh.lambda-url.us-east-1.on.aws/"
   }
 };
 

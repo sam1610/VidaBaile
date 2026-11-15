@@ -148,6 +148,19 @@ backend.vidaBaileWhatsapp.resources.lambda.addToRolePolicy(
   inboundQueue.queueUrl
 );
 
+// Expose vidaBaileWhatsapp as a public HTTPS URL so Meta can reach it for
+// webhook verification (GET) and inbound message events (POST).
+// authType: NONE is safe here because the handler validates the
+// X-Hub-Signature-256 HMAC on every POST before processing any payload.
+const whatsappWebhookUrl = (backend.vidaBaileWhatsapp.resources.lambda as LambdaFunction).addFunctionUrl({
+  authType: FunctionUrlAuthType.NONE,
+  cors: {
+    allowedOrigins: ['*'],
+    allowedHeaders: ['*'],
+    allowedMethods: [HttpMethod.ALL],
+  },
+});
+
 // ── B.2 vidaBaileChatAgent: DynamoDB (ClubRecord) + SQS Receive + Bedrock ──────
 backend.vidaBaileChatAgent.resources.lambda.addToRolePolicy(
   new PolicyStatement({
@@ -357,7 +370,8 @@ const flowUrl = flowEndpointLambda.addFunctionUrl({
 // 4. Output the URL to the terminal and Amplify outputs JSON after deployment
 backend.addOutput({
   custom: {
-    VidaBaileFlowUrl: flowUrl.url,
+    VidaBaileFlowUrl:        flowUrl.url,
+    VidaBaileWebhookUrl:     whatsappWebhookUrl.url,
   },
 });
 

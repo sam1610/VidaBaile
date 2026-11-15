@@ -9,9 +9,11 @@ export const vidaBaileProcessOutboundQueue = defineFunction({
     WHATSAPP_ACCESS_TOKEN: secret('WHATSAPP_ACCESS_TOKEN'),
     WHATSAPP_PHONE_ID:     secret('WHATSAPP_PHONE_ID'),
     // Meta-assigned Flow ID for the package-selection WhatsApp Flow.
-    // Not a secret — visible in the Meta Business dashboard.
-    WHATSAPP_FLOW_ID:      '2184446669618705',
-    // CTA button label shown on the interactive flow message (default: "View Packages").
-    WHATSAPP_FLOW_CTA:      'View Packages',
+    // Stored as a secret so it can be rotated per-environment without redeployment.
+    // Set via: npx ampx sandbox secret set WHATSAPP_FLOW_ID
+    // Current value: 1122104134028730
+    WHATSAPP_FLOW_ID:  secret('WHATSAPP_FLOW_ID'),
+    // CTA button label shown on the interactive flow message (non-sensitive).
+    WHATSAPP_FLOW_CTA: 'View Packages',
   },
 });
