@@ -284,7 +284,9 @@ export const handler = async (event: any) => {
 
       responseScreen = "Packages_Screen";
       responseData = {
-        packages_list: packagesList, // Matches "${data.packages_list}" in Flow JSON
+        packages_list: packagesList,
+        has_packages:  packagesList.length > 0,
+        no_packages:   packagesList.length === 0,
       };
       console.log(`📋 INIT response payload:`, JSON.stringify(responseData));
     }
@@ -297,7 +299,11 @@ export const handler = async (event: any) => {
         console.error(`❌ Meta routing error: ${payload.error_message}`);
         const packagesList = await fetchPackagesForInit(adminSub, broadcastId);
         responseScreen = "Packages_Screen";
-        responseData = { packages_list: packagesList };
+        responseData = {
+          packages_list: packagesList,
+          has_packages:  packagesList.length > 0,
+          no_packages:   packagesList.length === 0,
+        };
       }
       
       // ── 1. FINALIZE_SUBMISSION — must be checked FIRST ──────────────────────────
@@ -508,7 +514,11 @@ export const handler = async (event: any) => {
         // Return the packages screen as a safe fallback so the user is not stuck
         const packagesList = await fetchPackagesForInit(adminSub, broadcastId);
         responseScreen = "Packages_Screen";
-        responseData = { packages_list: packagesList };
+        responseData = {
+          packages_list: packagesList,
+          has_packages:  packagesList.length > 0,
+          no_packages:   packagesList.length === 0,
+        };
       }
     }
 
