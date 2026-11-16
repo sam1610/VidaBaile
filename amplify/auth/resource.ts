@@ -4,7 +4,7 @@ export const auth = defineAuth({
   loginWith: {
     email: true,
   },
-  groups: ['admin', 'coach'],
+  groups: ['Admins', 'coach'],  // 'Admins' must match the group name in amplify/data/resource.ts auth rules
   userAttributes: {
     // Define the custom attribute to link coaches to their admin
     'custom:adminSub': {
