@@ -3,22 +3,26 @@ backend:
   phases:
     preBuild:
       commands:
-        # 1. Force the build server to use Node 20 LTS
+        # Pin to Node 20 LTS — .nvmrc also set to 20 as a belt-and-suspenders guard
         - nvm install 20
         - nvm use 20
-        # 2. Clean cache and lockfiles
+        - node --version
+        - npm --version
+        # Wipe any cached state from previous failed builds
+        - rm -rf node_modules package-lock.json
         - npm cache clean --force
-        - rm -rf node_modules package-lock.json .npm
-        # 3. Install with legacy peer resolution to prevent hidden package drops
+        # Install with legacy peer deps to handle CDK peer resolution
         - npm install --legacy-peer-deps
     build:
       commands:
+        - node --version
         - npx ampx pipeline-deploy --branch main --app-id d1pmiq0zt0m85e
 frontend:
   phases:
     preBuild:
       commands:
         - nvm use 20
+        - node --version
         - npm install --legacy-peer-deps
     build:
       commands:
@@ -27,3 +31,6 @@ frontend:
     baseDirectory: dist
     files:
       - '**/*'
+  cache:
+    paths:
+      - node_modules/**/*
